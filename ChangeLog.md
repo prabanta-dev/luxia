@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `luxia` runs on Meri with exceptions in the VM: under AddressSanitizer
+  it lets Meri handle the faults of a run, so an access the IR left
+  unchecked (`--suppress=nil_check,dangling_check`) ends as a wrong
+  module, not as a report of the sanitizer.
 - Overloading (§ 8.8): `overload`, routines told apart by the types of
   their parameters, a call to its only candidate (codes L0093-L0096,
   L0099, warning L0101), bodies found by their parameters, one name from
