@@ -412,6 +412,8 @@ static void test_before(void)
 
 int main(void)
 {
+    limba_set_program(
+        "test_luxia_api"); /* the prefix of the messages of Limba */
     test_good(0);
     test_good(1);
     test_late();

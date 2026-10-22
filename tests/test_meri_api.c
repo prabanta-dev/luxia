@@ -267,6 +267,8 @@ static void misuse(void)
 
 int main(void)
 {
+    limba_set_program(
+        "test_meri_api"); /* the prefix of the messages of Limba */
     signal(SIGPIPE, SIG_IGN);
     CHECK(meri_version() && *meri_version(), "no version");
     both("calls.luxia", calls, "143 item\n", 0, false);

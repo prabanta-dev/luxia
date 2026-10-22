@@ -105,11 +105,15 @@ Some of its rules:
     luxia --lib-path=DIR program.luxia # where its C libraries are looked for
     luxia -I DIR program.luxia         # where its units are looked for
     luxia --stdlib=DIR program.luxia   # the units of the standard library
-    luxia --emit=lir program.luxia     # writes program.lir, runs nothing
-    luxia --emit=lit -o program.lit program.luxia   # the IR as text
     luxia --help                       # every option
 
 The options come before the source; what follows it goes to the program.
+For those who develop the compiler, a section of its own in `--help`:
+
+    luxia --emit=lir program.luxia     # writes program.lir (the IR), runs nothing
+    luxia --emit=lit -o program.lit program.luxia   # the IR as text
+    luxia --verify program.luxia       # verifies the IR of each function
+    luxia --emit=lir --stats --skip=gvn program.luxia   # the passes
 Errors in the source are reported, each with a stable code
 ([`doc/diagnostics.md`](doc/diagnostics.md)), and nothing runs (exit
 status 1). Once it runs, a program behaves as under `meri`: a run-time

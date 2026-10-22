@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Every message of `luxia` begins with `luxia:`, also the diagnoses of
+  no place and the line of the error limit, which said `limba:`; every
+  program of Luxia gives its name to Limba (`limba_set_program`).
+- `luxia --help` keeps the options of who programs in Luxia apart from
+  those of who develops the compiler (`--emit`, `-o`, `--target`,
+  `--verify`, `--stats`, `--skip`).
+- The specification (§ 9.6): the mathematical functions give the same
+  bits on every engine and platform, a `Float32` through `Float64`; they
+  may change between versions only to become better, declared.
 - Luxia gets a repository of its own, from Limba and Prabanta: the
   specification (`doc/luxia-0.md`), the diagnostics and the API of the
   front end (`doc/`, `include/limba/limba_luxia.h`); the front end

@@ -2762,6 +2762,7 @@ static int test_units(void)
 
 int main(void)
 {
+    limba_set_program("test_luxia"); /* the prefix of the messages of Limba */
     int failures = test_lexer() + test_report() + test_limit();
     failures += test_parser(expr_cases, COUNT(expr_cases), false, "expression");
     failures +=

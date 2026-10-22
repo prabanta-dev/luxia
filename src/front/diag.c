@@ -93,7 +93,7 @@ void limba_report_print(const limba_report *r, FILE *out)
             fprintf(out, "%s:%u:%u: ", r->src->file[w.file].path, w.line,
                     w.col);
         else
-            fputs("limba: ", out);
+            fputs(LX_PROGRAM ": ", out);
         fputs(sev_name[it->sev], out);
         if (it->code)
             fprintf(out, "[%c%04u]", r->letter, it->code);
@@ -102,5 +102,5 @@ void limba_report_print(const limba_report *r, FILE *out)
             show_line(r, &w, it->len, out);
     }
     if (r->full)
-        fprintf(out, "limba: stopped after %u errors\n", r->errors);
+        fprintf(out, LX_PROGRAM ": stopped after %u errors\n", r->errors);
 }

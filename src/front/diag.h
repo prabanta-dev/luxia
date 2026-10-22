@@ -18,6 +18,10 @@
 #include <stdint.h>
 #include <stdio.h>
 
+/* before a diagnosis of no place, and before the line of the error limit:
+   the name of the language, as luxia prints its run-time errors */
+#define LX_PROGRAM "luxia"
+
 typedef enum { LIMBA_ERROR, LIMBA_WARNING, LIMBA_NOTE } limba_severity;
 
 typedef struct {

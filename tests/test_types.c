@@ -7,6 +7,7 @@
 #include "common/strtab.h"
 #include "front/symtab.h"
 #include "front/types.h"
+#include "limba/ir.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -132,6 +133,7 @@ static void test_symtab(void)
 
 int main(void)
 {
+    limba_set_program("test_types"); /* the prefix of the messages of Limba */
     test_types();
     test_symtab();
     printf("test_types: types, scopes, %d failures\n", failures);

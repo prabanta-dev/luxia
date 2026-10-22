@@ -13,6 +13,7 @@
  * (as -i) and DIR/args (as -a); the directories must exist or be creatable.
  */
 #include "front/gen.h"
+#include "limba/ir.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -82,6 +83,7 @@ static int write_dir(const char *dir, const limba_lxgen *p)
 
 int main(int argc, char **argv)
 {
+    limba_set_program("lx_gen"); /* the prefix of the messages of Limba */
     if (argc == 4 && !strcmp(argv[1], "-d")) {
         limba_lxgen p;
         if (!limba_lxgen_make_units(strtoull(argv[3], NULL, 0), &p)) {

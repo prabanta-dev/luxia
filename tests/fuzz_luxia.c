@@ -17,11 +17,22 @@
 #include "front/parse.h"
 #include "front/lower.h"
 #include "front/sema.h"
+#include "limba/ir.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 
+int LLVMFuzzerInitialize(int *argc, char ***argv);
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size);
+
+/* libFuzzer calls it once before the first input; the driver below too */
+int LLVMFuzzerInitialize(int *argc, char ***argv)
+{
+    (void)argc;
+    (void)argv;
+    limba_set_program("fuzz_luxia"); /* the prefix of the messages of Limba */
+    return 0;
+}
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
@@ -67,6 +78,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 #ifndef LIMBA_FUZZER
 int main(int argc, char **argv)
 {
+    LLVMFuzzerInitialize(&argc, &argv);
     for (int i = 1; i < argc; i++) {
         FILE *f = fopen(argv[i], "rb");
         if (!f) {

@@ -9,6 +9,7 @@
  * --emit the source is compiled and written (emit.c), not run.
  */
 #include "emit.h"
+#include "limba/ir.h"
 #include "limba/limba_luxia.h"
 #include "meri/meri.h"
 
@@ -25,24 +26,15 @@ static void usage(FILE *out)
 {
     fputs("Usage: luxia [options] <program.luxia> [arguments of the "
           "program]\n"
-          "       luxia --emit=lir|lit|tokens|ast [options] <program.luxia>\n"
           "\n"
-          "Compiles a Luxia source and runs it, in one process: the front\n"
-          "end makes the IR, Meri compiles it to bytecode a\n"
-          "function at a time and runs its main. Errors in the source are\n"
-          "reported and nothing runs (exit status 1). A run-time error\n"
-          "stops the program with a message and exit status 1; halt(code)\n"
-          "exits with code.\n"
-          "\n"
-          "With --emit the source is compiled and written, not run: its\n"
-          "IR (lir, binary, next to the source unless -o; lit, text, on\n"
-          "the standard output unless -o), its tokens or its syntax tree.\n"
+          "Compiles a Luxia source and runs it, in one process. Errors in\n"
+          "the source are reported and nothing runs (exit status 1). A\n"
+          "run-time error stops the program with a message and exit\n"
+          "status 1; halt(code) exits with code.\n"
           "\n"
           "Options (before the source)\n"
           "  -O0, -O1   optimise: no, or yes (default)\n"
           "  --check    compile only: report the errors, run nothing\n"
-          "  --verify   verify the IR of each function before it is run\n"
-          "             (always on in the builds that are not release)\n"
           "  --suppress=a,b\n"
           "             checks off in the whole source (index_check,\n"
           "             range_check, overflow_check, division_check,\n"
@@ -65,16 +57,27 @@ static void usage(FILE *out)
           "             the memory the program may use (blocks, strings,\n"
           "             globals, slots); past it, \"out of memory\". By\n"
           "             default half of the physical memory\n"
+          "  --version  print the version and exit\n"
+          "  --help     print this text and exit\n"
+          "\n"
+          "For those who develop the compiler\n"
+          "       luxia --emit=lir|lit|tokens|ast [options] <program.luxia>\n"
+          "\n"
+          "The front end makes the intermediate representation (IR) of\n"
+          "Limba, and Meri compiles it to bytecode a function at a time.\n"
+          "With --emit the source is compiled and written, not run: its\n"
+          "IR (lir, binary, next to the source unless -o; lit, text, on\n"
+          "the standard output unless -o), its tokens or its syntax tree.\n"
           "  --emit=K   write, do not run: lir, lit, tokens or ast\n"
           "  -o FILE    with --emit, where to write\n"
           "  --target=P with --emit, the platform whose C the C types by\n"
           "             name follow: x86_64-linux, aarch64-linux,\n"
           "             x86_64-windows (by default this one)\n"
+          "  --verify   verify the IR of each function before it is run\n"
+          "             (always on in the builds that are not release)\n"
           "  --stats    with --emit, what each pass changed, on standard\n"
           "             error\n"
-          "  --skip=a,b passes not to run (also LIMBA_OPTSKIP)\n"
-          "  --version  print the version and exit\n"
-          "  --help     print this text and exit\n",
+          "  --skip=a,b passes not to run (also LIMBA_OPTSKIP)\n",
           out);
 }
 
@@ -299,9 +302,11 @@ static int run(int argc, char **argv, const char **unit_dirs)
 int main(int argc, char **argv)
 {
     /* the directories of -I, ended by NULL: at most one an argument */
-    const char **unit_dirs = calloc((size_t)argc + 1, sizeof(*unit_dirs));
+    const char **unit_dirs;
     int status;
 
+    limba_set_program("luxia"); /* the prefix of the messages of Limba */
+    unit_dirs = calloc((size_t)argc + 1, sizeof(*unit_dirs));
     if (!unit_dirs) {
         fputs("luxia: out of memory\n", stderr);
         return 1;

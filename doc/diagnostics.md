@@ -71,7 +71,7 @@ that are its consequence, so the first one is the one to fix first.
 After **20 errors** `luxia` stops reporting and ends with the line
 
 ```
-limba: stopped after 20 errors
+luxia: stopped after 20 errors
 ```
 
 ### Exit status

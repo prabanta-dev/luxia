@@ -25,7 +25,7 @@
 /* errors reported before giving up, by default */
 #define MAX_ERRORS 20
 
-/* a diagnosis of no place: printed as limba prints it, and given */
+/* a diagnosis of no place: printed as luxia prints it, and given */
 static void say(const limba_luxia_options *o, const limba_luxia_consumer *c,
                 int sev, const char *fmt, ...)
     __attribute__((format(printf, 4, 5)));
@@ -39,7 +39,7 @@ static void say(const limba_luxia_options *o, const limba_luxia_consumer *c,
     vsnprintf(msg, sizeof(msg), fmt, ap);
     va_end(ap);
     if (o->diag_out)
-        fprintf(o->diag_out, "limba: %s%s\n",
+        fprintf(o->diag_out, LX_PROGRAM ": %s%s\n",
                 sev == LIMBA_LUXIA_WARNING ? "warning: " : "", msg);
     if (c->diag) {
         limba_luxia_diag d = {sev, "", NULL, 0, 0, 0, msg};
