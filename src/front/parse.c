@@ -327,8 +327,10 @@ static uint32_t params(limba_lxp *P)
             }
             uint32_t names = limba_lxp_names(P);
             limba_lxp_expect(P, LX_COLON, "and the type of the parameter");
-            uint32_t type = limba_lxp_type(P);
-            uint32_t p = lxp_node(P, LXN_PARAM, ploc, names, type, 0, 0);
+            uint32_t type = limba_lxp_type(P), def = 0;
+            if (limba_lxp_accept(P, LX_ASSIGN))
+                def = limba_lxp_expr(P, LXP_EXPR);
+            uint32_t p = lxp_node(P, LXN_PARAM, ploc, names, type, def, 0);
             P->t->node[p].op = (uint8_t)mode;
             limba_lx_list_push(P->t, p);
         } while (limba_lxp_accept(P, LX_SEMI));

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Arguments by name, `f(x => 1)`, and default values of parameters,
+  `from: Int64 := 1` (specification § 8.6, § 8.7): those by position
+  first, evaluated as written; a default value is a constant, only
+  without a mode, on the last parameters, the same in an interface and
+  its body. Codes L0086-L0091; `lx_gen` writes both.
 - Every message of `luxia` begins with `luxia:`, also the diagnoses of
   no place and the line of the error limit, which said `limba:`; every
   program of Luxia gives its name to Limba (`limba_set_program`).

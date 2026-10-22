@@ -1006,9 +1006,10 @@ static void scan_taken(lxl *L)
         if (y->kind != LIMBA_LSYM_ROUTINE || !y->type)
             continue;
         const limba_typeinfo *sig = ti(L, y->type);
-        for (uint32_t i = 0; i < sig->count && i < list_n(L, args); i++)
-            if (S->ts.param[sig->first + i].mode != LXS_IN)
-                mark_taken(L, list_at(L, args, i));
+        for (uint32_t i = 0; i < sig->count; i++)
+            if (S->ts.param[sig->first + i].mode != LXS_IN &&
+                lxs_call_arg(S, n, i))
+                mark_taken(L, lxs_call_arg(S, n, i));
     }
 }
 

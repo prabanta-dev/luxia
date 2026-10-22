@@ -219,11 +219,21 @@ typedef struct {
        node, then who makes it (as the uses) */
     uint32_t *eqs;
     uint32_t neqs, capeqs;
+    /* per CALL node of a routine with arguments by name or default
+       values: 1 + where in argpool the argument of each parameter is, in
+       the order of the parameters (the value of a name => value, or the
+       default value of the declaration); 0: the arguments as written */
+    uint32_t *argmap;
+    uint32_t *argpool;
+    uint32_t nargpool, capargpool;
 } limba_lxs;
 
 void limba_lxs_init(limba_lxs *S, limba_lx_ast *t, limba_lx *lx,
                     const limba_source *src, limba_report *rep);
 void limba_lxs_free(limba_lxs *S);
+/* the argument of parameter i of a call of a routine: the node of its
+   value, written or the default one; 0 past the arguments */
+uint32_t lxs_call_arg(const limba_lxs *S, uint32_t call, uint32_t i);
 /* the whole program at t->root */
 void limba_lxs_check(limba_lxs *S);
 

@@ -853,7 +853,9 @@ In the assignment `a[i] := e`, the **target is evaluated first** (with the
 index check), then the value, then the range check of the target.
 
 The components of an aggregate are evaluated from left to right as
-written, `else` last (§ 6.8).
+written, `else` last (§ 6.8). The arguments of a call are evaluated as
+written, those given by name too (§ 8.7); the default values of the
+parameters left out are constants and need no evaluation (§ 8.6).
 
 ### 6.8 Aggregates
 
@@ -1082,8 +1084,7 @@ A routine can be used before its definition in the same file, with no
 
 ### 8.4 Not in Luxia 0
 
-No overloading, no nested routines, no default parameters, no named
-association of arguments.
+No overloading, no nested routines.
 
 ### 8.5 External routines
 
@@ -1142,6 +1143,62 @@ function sqrtf(x: CFloat): CFloat;
 - The arguments are computed and checked **before** the call, from the
   left, as for any routine; the result is converted and checked after
   it. What happens inside the call is the subject of § 10.4.
+
+### 8.6 Default values
+
+A parameter without a mode may have a **default value**, written after
+its type as in a declaration of a variable; a call that gives no argument
+for it passes that value:
+
+```pascal
+function Pos(sub, s: String; from: Int64 := 1): Int64;
+
+Pos("a", t);             // from is 1
+Pos("a", t, 5);
+```
+
+- The default value is a **constant** of the type of the parameter,
+  computed once where the routine is declared (§ 4): a literal, a
+  constant expression, a declared constant, `nil`, an aggregate of
+  constants (§ 6.8) or a typed constant (§ 4.3). It must fit the type,
+  its range included (a compile-time error otherwise). A value computed
+  at run time is not allowed: a call runs no code it does not show.
+- Only a parameter without a mode has one: a `var` or `out` parameter
+  always has an argument. An open array parameter has none: its bounds
+  come from the argument.
+- The parameters with a default value **come last**: after one with a
+  default value, every parameter has one. With names (§ 8.7) any of them
+  may be left out.
+- Several names in one parameter declaration share its default value:
+  `a, b: Int32 := 0`.
+- A routine of the interface of a unit and its body give the **same**
+  default value to each parameter: the body repeats it (§ 11.2).
+
+### 8.7 Arguments by name
+
+An argument may name its parameter, `name => value`, as in Ada:
+
+```pascal
+procedure Draw(x, y: Int32; colour: Colour := Black; width: Int32 := 1);
+
+Draw(10, 20, width => 3);              // colour is Black
+Draw(y => 20, x => 10, colour => Red);
+```
+
+- The arguments **by position come first**; after an argument by name
+  none is by position. Each parameter receives **one** argument, by
+  position or by name, and every parameter without a default value
+  receives one: anything else is a compile-time error.
+- The name is that of the parameter, spelt as declared (§ 2.2); it goes
+  with every mode (`var` and `out` too, with a variable as value).
+- The arguments are evaluated **in the order they are written** (§ 6.7),
+  not in the order of the parameters.
+- Arguments by name are given to the routines of the program and of its
+  units, external routines included; not to the routines of the
+  predefined library (§ 9) nor to a conversion, whose parameters have no
+  names.
+- The names of the parameters of a routine of an interface are part of
+  what the unit offers (§ 11.2): a program may name them.
 
 ## 9. The predefined library
 
@@ -1671,6 +1728,9 @@ end Geometry.
     spelt alike, in the same order, with the same modes (none, `var`,
     `out`); grouping does not matter (`a, b: Vector` and
     `a: Vector; b: Vector` conform);
+  - **the same default values** (§ 8.6): a parameter with one in the
+    interface has the same constant in the body, written there too, and
+    one without has none;
   - **semantically for types**: each parameter and the result have the
     same type however written (`Vector` and `Geometry.Vector` are the
     same type); a subtype with a range has the same bounds
@@ -1858,7 +1918,7 @@ Routine    = ( "procedure" ident Params | "function" ident Params ":" Type )
                  | "external" string [ ident string ] ";" ) .
 LocalDecl  = ConstSec | TypeSec | VarSec | Pragma ";" .
 Params     = "(" [ Param { ";" Param } ] ")" .
-Param      = [ "var" | "out" ] IdentList ":" Type .
+Param      = [ "var" | "out" ] IdentList ":" Type [ ":=" Expr ] .
 Type       = QualIdent [ "range" ( Range | "<>" ) ]
            | "new" Type
            | "(" IdentList ")"
@@ -1897,7 +1957,7 @@ Primary    = integer | real | char | string | "true" | "false" | "nil"
 Aggregate  = "{" [ Component { ( "," | ";" ) Component } ] "}" .
 Component  = "else" Expr | Simple [ [ ".." Simple ] ":" Expr ] .
 Designator = ident { "." ident | "[" Expr "]" | "^" | "(" [ Arg { "," Arg } ] ")" } .
-Arg        = Expr [ ":" Expr [ ":" Expr ] ] .
+Arg        = Expr [ ":" Expr [ ":" Expr ] | "=>" Expr ] .
 ```
 
 The strictness rules of expressions are in the grammar itself: `and`,
@@ -1935,7 +1995,6 @@ and tools can anticipate them.
 
 - Exceptions and handlers (`raise`, `try ... except`), grouping the
   run-time checks as Ada's `Constraint_Error` does.
-- Named association of arguments (`F(x => 1)`), optional.
 - An order (`<`) on arrays of discrete elements, as in Ada.
 - Sets; the brackets of Pascal (`[a, b]`) remain free for them.
 - Assignment of whole open arrays, with a length check.

@@ -235,6 +235,13 @@ static uint32_t argument(limba_lxp *P)
 {
     limba_loc loc = lxp_loc(P);
     uint32_t e = limba_lxp_expr(P, LXP_EXPR);
+    if (limba_lxp_accept(P, LX_ARROW)) {
+        /* name => value; the name must be a plain one (sema says so) */
+        const limba_lx_node *x = &P->t->node[e];
+        uint32_t name = x->kind == LXN_REF ? x->a : 0;
+        return lxp_node(P, LXN_NAMED, P->t->node[e].loc, name,
+                        limba_lxp_expr(P, LXP_EXPR), 0, 0);
+    }
     if (!limba_lxp_accept(P, LX_COLON))
         return e;
     uint32_t width = limba_lxp_expr(P, LXP_EXPR), decimals = 0;

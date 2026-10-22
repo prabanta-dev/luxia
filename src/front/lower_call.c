@@ -232,46 +232,71 @@ static void routine(lxl *L, uint32_t node, limba_sym s, limba_id *result)
        back after the call, the slot the routine writes, its type */
     limba_id *backs = NULL;
     uint32_t nbacks = 0, capbacks = 0;
-    for (uint32_t i = 0; i < count && i < nargs(L, node); i++) {
-        limba_param p = S->ts.param[first + i];
-        uint32_t a = arg(L, node, i);
-        limba_ltype at = S->type[a];
-        if (ti(L, at)->kind == LIMBA_LTK_POINTER)
-            at = ti(L, at)->elem;
-        limba_id v[3];
-        uint32_t k = 1;
-        bool by_addr = true;
-        if (ti(L, p.type)->kind == LIMBA_LTK_OPEN) {
-            open_arg(L, node, a, p.type, &v[0], &v[1], &v[2]);
-            k = ext ? 1 : 3;
-        } else if (p.mode != LXS_IN || !lxl_scalar(L, p.type)) {
-            v[0] = lxl_addr(L, a);
-        } else {
-            by_addr = false;
-            v[0] = lxl_value(L, a);
-            lxl_at(L, node); /* a range is checked at the call */
-            v[0] = lxl_coerce(L, v[0], S->type[a], p.type);
-        }
-        /* a record or an array reached through a pointer is no argument
-           (§ 3.10, sema): only a scalar out one comes here */
-        bool through = by_addr && lxl_via(L, v[0]) != LIMBA_NONE;
-        if (through && p.mode == LXS_OUT) {
-            /* a scalar (a var argument, an aggregate out one, cannot be
-               reached through a pointer: § 3.10): copy-out goes back
-               through the pointer after the call, checked there */
-            limba_id tmp = lxl_temp(L, at, node);
-            limba_id back[3] = {v[0], tmp, lxl_type(L, at)};
-            for (unsigned j = 0; j < 3; j++) {
-                LIMBA_GROW(backs, nbacks, capbacks);
-                backs[nbacks++] = back[j];
+    /* the operands of each parameter (up to 3: an open array), made in
+       the order the arguments are written, then the default values
+       (constants), and given in the order of the parameters */
+    limba_id(*pv)[3] = limba_xcalloc(count + 1, sizeof(*pv));
+    uint32_t *pk = limba_xcalloc(count + 1, sizeof(*pk));
+    uint32_t written = nargs(L, node);
+    for (uint32_t w = 0; w <= written; w++) {
+        /* w < written: the argument written at w; w == written: the
+           parameters still without operands (their default values) */
+        for (uint32_t i = 0; i < count; i++) {
+            uint32_t a = lxs_call_arg(S, node, i);
+            if (!a || pk[i])
+                continue;
+            if (w < written) {
+                uint32_t wa = arg(L, node, w);
+                if (S->t->node[wa].kind == LXN_NAMED)
+                    wa = S->t->node[wa].b;
+                if (wa != a)
+                    continue;
             }
-            v[0] = tmp;
-        }
-        for (uint32_t j = 0; j < k; j++) {
-            LIMBA_GROW(ops, n, cap);
-            ops[n++] = v[j];
+            limba_param p = S->ts.param[first + i];
+            limba_ltype at = S->type[a];
+            if (ti(L, at)->kind == LIMBA_LTK_POINTER)
+                at = ti(L, at)->elem;
+            limba_id *v = pv[i];
+            uint32_t k = 1;
+            bool by_addr = true;
+            if (ti(L, p.type)->kind == LIMBA_LTK_OPEN) {
+                open_arg(L, node, a, p.type, &v[0], &v[1], &v[2]);
+                k = ext ? 1 : 3;
+            } else if (p.mode != LXS_IN || !lxl_scalar(L, p.type)) {
+                v[0] = lxl_addr(L, a);
+            } else {
+                by_addr = false;
+                v[0] = lxl_value(L, a);
+                lxl_at(L, node); /* a range is checked at the call */
+                v[0] = lxl_coerce(L, v[0], S->type[a], p.type);
+            }
+            /* a record or an array reached through a pointer is no
+               argument (§ 3.10, sema): only a scalar out one comes here */
+            bool through = by_addr && lxl_via(L, v[0]) != LIMBA_NONE;
+            if (through && p.mode == LXS_OUT) {
+                /* a scalar (a var argument, an aggregate out one, cannot
+                   be reached through a pointer: § 3.10): copy-out goes
+                   back through the pointer after the call, checked there */
+                limba_id tmp = lxl_temp(L, at, node);
+                limba_id back[3] = {v[0], tmp, lxl_type(L, at)};
+                for (unsigned j = 0; j < 3; j++) {
+                    LIMBA_GROW(backs, nbacks, capbacks);
+                    backs[nbacks++] = back[j];
+                }
+                v[0] = tmp;
+            }
+            pk[i] = k;
+            if (w < written)
+                break;
         }
     }
+    for (uint32_t i = 0; i < count; i++)
+        for (uint32_t j = 0; j < pk[i]; j++) {
+            LIMBA_GROW(ops, n, cap);
+            ops[n++] = pv[i][j];
+        }
+    free(pv);
+    free(pk);
     lxl_at(L, node);
     limba_id rt =
         sig->elem == S->ts.void_ || agg ? LIMBA_T_VOID : lxl_type(L, sig->elem);

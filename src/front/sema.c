@@ -302,6 +302,7 @@ void limba_lxs_init(limba_lxs *S, limba_lx_ast *t, limba_lx *lx,
     S->type = limba_xcalloc(n, sizeof(*S->type));
     S->sym = limba_xcalloc(n, sizeof(*S->sym));
     S->val = limba_xcalloc(n, sizeof(*S->val));
+    S->argmap = limba_xcalloc(n, sizeof(*S->argmap));
     lxs_value_new(S, 0); /* value 0: none */
     universe(S);
 #if defined(__aarch64__) && !defined(_WIN32)
@@ -321,6 +322,8 @@ void limba_lxs_free(limba_lxs *S)
     free(S->type);
     free(S->sym);
     free(S->val);
+    free(S->argmap);
+    free(S->argpool);
     free(S->spelling);
     free(S->tconsts);
     free(S->eqs);
@@ -608,6 +611,65 @@ static void resolve_typedecl(limba_lxs *S, limba_sym s)
 
 static void conform(limba_lxs *S, limba_sym s);
 
+uint32_t lxs_call_arg(const limba_lxs *S, uint32_t call, uint32_t i)
+{
+    const limba_lx_node *x = &S->t->node[call];
+    if (S->argmap[call])
+        return S->argpool[S->argmap[call] - 1 + i];
+    const limba_lx_node *l = &S->t->node[x->b];
+    if (i >= l->b)
+        return 0;
+    uint32_t a = limba_lx_list_at(S->t, x->b, i);
+    return S->t->node[a].kind == LXN_NAMED ? S->t->node[a].b : a;
+}
+
+/* the default value of a parameter: only without a mode and not on an
+   open array; a constant of the type of the parameter (a scalar, a
+   String, a BigInt, nil, an aggregate of constants or a typed constant),
+   computed once here */
+static void check_default(limba_lxs *S, uint32_t p, unsigned mode,
+                          limba_ltype pt, uint32_t scope)
+{
+    uint32_t v = lxs_node(S, p)->c;
+    if (!v)
+        return;
+    if (mode != LXS_IN) {
+        lxs_error(S, LXE_DEFAULT_PLACE, v,
+                  "a default value is only for a parameter without a "
+                  "mode: a var or out one always has an argument");
+        return;
+    }
+    if (pt && lxs_ty(S, pt)->kind == LIMBA_LTK_OPEN) {
+        lxs_error(S, LXE_DEFAULT_PLACE, v,
+                  "an open array parameter has no default value: its "
+                  "bounds come from the argument");
+        return;
+    }
+    uint32_t errors = S->rep->errors;
+    limba_ltype vt = lxs_expr(S, v, scope, pt);
+    limba_lx_node *x = lxs_node(S, v);
+    bool known = S->val[v] != 0 ||
+                 (x->kind == LXN_AGG && (x->flags & LXN_F_CONST)) ||
+                 (x->kind == LXN_REF && S->sym[v] &&
+                  (S->st.sym[S->sym[v]].flags & LXS_TCONST));
+    if (!known) {
+        if (vt && S->rep->errors == errors)
+            lxs_error(S, LXE_NOT_CONSTANT, v,
+                      "a default value is a constant: known at compile "
+                      "time");
+        return;
+    }
+    if (!pt || !vt)
+        return;
+    if (S->val[v]) {
+        lxs_assign_to(S, v, pt, "the parameter");
+    } else if (!lxs_compatible(S, vt, pt)) {
+        char ta[128], tb[128];
+        lxs_error(S, LXE_TYPE_MISMATCH, v, "this is %s, the parameter is %s",
+                  lxs_tname(S, vt, ta), lxs_tname(S, pt, tb));
+    }
+}
+
 static void resolve_routine(limba_lxs *S, limba_sym s)
 {
     limba_symbol *y = &S->st.sym[s];
@@ -622,7 +684,7 @@ static void resolve_routine(limba_lxs *S, limba_sym s)
     limba_lx_node *x = lxs_node(S, d);
     uint32_t plist = x->b;
     limba_param *ps = NULL;
-    uint32_t np = 0, cap = 0;
+    uint32_t np = 0, cap = 0, with_default = 0;
     for (uint32_t i = 0; i < lxs_node(S, plist)->b; i++) {
         uint32_t p = limba_lx_list_at(S->t, plist, i);
         limba_lx_node *px = lxs_node(S, p);
@@ -630,6 +692,16 @@ static void resolve_routine(limba_lxs *S, limba_sym s)
                         : px->op == LX_KW_OUT ? LXS_OUT
                                               : LXS_IN;
         limba_ltype pt = lxs_type(S, px->b, outer, LXT_PARAM);
+        /* the parameters with a default value come last */
+        if (lxs_node(S, p)->c)
+            with_default = p;
+        else if (with_default)
+            lxs_error(S, LXE_DEFAULT_PLACE,
+                      limba_lx_list_at(S->t, lxs_node(S, p)->a, 0),
+                      "a parameter without a default value after one with "
+                      "it: those with a default value come last");
+        check_default(S, p, mode, pt, outer);
+        px = lxs_node(S, p);
         uint32_t names = px->a;
         for (uint32_t k = 0; k < lxs_node(S, names)->b; k++) {
             uint32_t nn = limba_lx_list_at(S->t, names, k);
@@ -666,6 +738,35 @@ static bool same_type(limba_lxs *S, limba_ltype a, limba_ltype b)
     if ((x->flags | y->flags) & LIMBA_TF_RANGE)
         return false;
     return limba_types_same(&S->ts, a, b);
+}
+
+/* two default values: both absent, or the same constant (a value, a
+   typed constant, or aggregates of the same components) */
+static bool same_value(limba_lxs *S, uint32_t a, uint32_t b)
+{
+    if (!a || !b)
+        return a == b;
+    if (S->val[a] || S->val[b])
+        return S->val[a] && S->val[b] &&
+               lxs_value_cmp(S, S->val[a], S->val[b]) == 0;
+    const limba_lx_node *x = lxs_node(S, a), *y = lxs_node(S, b);
+    if (x->kind != y->kind)
+        return false;
+    if (x->kind == LXN_REF)
+        return x->a == y->a && S->sym[a] == S->sym[b];
+    if (x->kind == LXN_COMP)
+        return x->op == y->op && same_value(S, x->a, y->a) &&
+               same_value(S, x->b, y->b) && same_value(S, x->c, y->c);
+    if (x->kind != LXN_AGG)
+        return false;
+    uint32_t n = lxs_node(S, x->a)->b;
+    if (n != lxs_node(S, y->a)->b)
+        return false;
+    for (uint32_t i = 0; i < n; i++)
+        if (!same_value(S, limba_lx_list_at(S->t, x->a, i),
+                        limba_lx_list_at(S->t, y->a, i)))
+            return false;
+    return true;
 }
 
 /* the heading of the body conforms to that of the interface: textual for
@@ -731,6 +832,19 @@ static void conform(limba_lxs *S, limba_sym s)
                          (int)blen, bt, lxs_tname(S, t1, tb),
                          lxs_tname(S, t2, tc));
                 why = buf;
+            } else if (hk == 0) {
+                /* the body repeats the default value, the same */
+                unsigned mode = lxs_node(S, hp)->op == LX_KW_VAR   ? LXS_VAR
+                                : lxs_node(S, hp)->op == LX_KW_OUT ? LXS_OUT
+                                                                   : LXS_IN;
+                check_default(S, hp, mode, t1, intf);
+                if (!same_value(S, lxs_node(S, hp)->c, lxs_node(S, bp)->c)) {
+                    snprintf(buf, sizeof(buf),
+                             "the default value of '%.*s' is not the one of "
+                             "the interface",
+                             (int)blen, bt);
+                    why = buf;
+                }
             }
         }
         hk++;

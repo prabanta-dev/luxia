@@ -1757,6 +1757,112 @@ end.
 prog.luxia:5:27: error[L0085]: 'x' comes before 'y' in the record: the fields go in the order of the declaration
 ```
 
+### L0086 — BY POSITION AFTER BY NAME
+
+The arguments by position come first; after an argument by name, none is by position (§ 8.7). The argument out of place is not taken, so a parameter may also lack one.
+
+```pascal
+program p;
+procedure Draw(x, y: Int32; width: Int32 := 1);
+begin
+end;
+begin
+  Draw(x => 1, 2);
+end.
+```
+
+```
+prog.luxia:6:16: error[L0086]: an argument by position after one by name: those by position come first
+prog.luxia:6:3: error[L0089]: the parameter 'y' of 'Draw' has no argument
+```
+
+### L0087 — NO SUCH PARAMETER
+
+An argument by name names a parameter of the routine, with a plain name before `=>` (§ 8.7).
+
+```pascal
+program p;
+procedure Draw(x, y: Int32; width: Int32 := 1);
+begin
+end;
+begin
+  Draw(1, 2, size => 3);
+end.
+```
+
+```
+prog.luxia:6:14: error[L0087]: 'Draw' has no parameter 'size'
+```
+
+### L0088 — PARAMETER GIVEN TWICE
+
+Each parameter receives one argument, by position or by name (§ 8.7).
+
+```pascal
+program p;
+procedure Draw(x, y: Int32; width: Int32 := 1);
+begin
+end;
+begin
+  Draw(1, 2, x => 3);
+end.
+```
+
+```
+prog.luxia:6:14: error[L0088]: the parameter 'x' is given twice
+```
+
+### L0089 — PARAMETER WITHOUT ARGUMENT
+
+A call with arguments by name gives an argument to every parameter without a default value (§ 8.6, § 8.7). Without names, too few arguments are L0035.
+
+```pascal
+program p;
+procedure Draw(x, y: Int32; width: Int32 := 1);
+begin
+end;
+begin
+  Draw(y => 2, width => 3);
+end.
+```
+
+```
+prog.luxia:6:3: error[L0089]: the parameter 'x' of 'Draw' has no argument
+```
+
+### L0090 — BY NAME WHERE IT CANNOT GO
+
+Arguments by name go to the routines of the program and of its units; the routines of the predefined library and the conversions have no names for their parameters (§ 8.7).
+
+```pascal
+program p;
+begin
+  writeln(x => 1);
+end.
+```
+
+```
+prog.luxia:3:11: error[L0090]: an argument by name (name => value) goes only to a routine of the program, not to one of the language nor to a conversion
+```
+
+### L0091 — DEFAULT VALUE OUT OF PLACE
+
+A default value goes only on a parameter without a mode, not on an open array, and the parameters with one come last (§ 8.6).
+
+```pascal
+program p;
+procedure Get(out r: Int32 := 0);
+begin
+  r := 1;
+end;
+begin
+end.
+```
+
+```
+prog.luxia:2:31: error[L0091]: a default value is only for a parameter without a mode: a var or out one always has an argument
+```
+
 ## All the codes
 
 | Code | Name | Meaning |
@@ -1846,3 +1952,9 @@ prog.luxia:5:27: error[L0085]: 'x' comes before 'y' in the record: the fields go
 | L0083 | AGG_FORM | an aggregate in a form it does not take |
 | L0084 | AGG_LENGTH | a positional aggregate longer or shorter than its array |
 | L0085 | AGG_ORDER | the fields of a record aggregate out of order |
+| L0086 | ARG_ORDER | an argument by position after one by name |
+| L0087 | ARG_NAME | `name => value` with no such parameter, or no plain name |
+| L0088 | ARG_TWICE | a parameter given twice |
+| L0089 | ARG_MISSING | a parameter without a default value given no argument |
+| L0090 | NAMED_PLACE | an argument by name to a routine of the language or a conversion |
+| L0091 | DEFAULT_PLACE | a default value on a `var`, `out` or open array parameter, or not last |

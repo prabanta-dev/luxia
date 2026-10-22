@@ -114,3 +114,16 @@ LX_ERROR(84, AGG_LENGTH)        /* a positional aggregate longer or
                                    shorter than its array */
 LX_ERROR(85, AGG_ORDER)         /* the fields of a record out of the
                                    order of its declaration */
+/* arguments by name and default values (Luxia 1, step 1) */
+LX_ERROR(86, ARG_ORDER)         /* an argument by position after one by
+                                   name */
+LX_ERROR(87, ARG_NAME)          /* name => value with a name that is no
+                                   parameter, or no plain name */
+LX_ERROR(88, ARG_TWICE)         /* a parameter given twice */
+LX_ERROR(89, ARG_MISSING)       /* a parameter without a default value
+                                   given no argument */
+LX_ERROR(90, NAMED_PLACE)       /* name => value in a call of a routine of
+                                   the language or a conversion */
+LX_ERROR(91, DEFAULT_PLACE)     /* a default value on a var, out or open
+                                   array parameter, or a parameter without
+                                   one after one with one */

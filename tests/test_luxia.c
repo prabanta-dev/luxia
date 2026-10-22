@@ -62,6 +62,8 @@ static const lex_case lex_cases[] = {
     {"+ - * / ** & = <> < <= > >= := : ; , . .. ( ) [ ] ^",
      "+ - * / ** & = <> < <= > >= := : ; , . .. ( ) [ ] ^ eof", ""},
     {"x:=1 a.b p^.x", "id:x := int:1 id:a . id:b id:p ^ . id:x eof", ""},
+    /* => for an argument by name; = > apart is two tokens */
+    {"f(x => 1) a = > b", "id:f ( id:x => int:1 ) id:a = > id:b eof", ""},
     /* comments */
     {"a // x\nb (* c (* d *) e *) f", "id:a id:b id:f eof", ""},
     {"a (* b (* c *)", "id:a eof", "L0004@1:3"},
@@ -347,7 +349,13 @@ static const parse_case program_cases[] = {
      "(program p [] [(if [(arm a [(assign x 1)])] -)])", "L0020@5:4"},
     {"program p; begin end. x", "(program p [] [])", "L0019@1:23"},
     {"program p; begin if a then begin x := 1; end; end.",
-     "(program p [] [(if [(arm a [(assign x 1)])] -)])", "L0016@1:28"},
+     "(program p [] [(if [(arm a [(assign x 1)])] -)])",
+     "L0016@1:28"}, /* a default value, an argument by name */
+    {"program p; procedure q(a: Int32 := 1); begin end; begin q(a => 2); "
+     "end.",
+     "(program p [(routine procedure q [(param [a] (tname int32 - -) 1)] - "
+     "(body [] []))] [(callst (call q [(named a 2)]))])",
+     ""},
 };
 
 static void parse_string(const char *src, bool whole, char **tree,
@@ -780,7 +788,45 @@ static const sema_case sema_cases[] = {
     {"program p; var b: BigInt := 2; begin b := b and b; end.", "L0028@1:45"},
     {"program p; var b: BigInt := 2; begin writeln(b / b); end.", "L0028@1:48"},
     {"program p; var b: BigInt := 2; begin writeln(low(BigInt)); end.",
-     "L0027@1:50"},
+     "L0027@1:50"}, /* arguments by name and default values (Luxia 1, step 1) */
+    {"program p; procedure q(a: Int32; b: Int32 := 0); begin end; begin q(1); q(1, 2); q(a => 1); q(b => 2, a => 1); q(1, b => 2); end.",
+     ""},
+    {"program p; procedure q(a: Int32; b: Int32 := 0); begin end; begin q(b => 1, 2); end.",
+     "L0086@1:77 L0089@1:67"},
+    {"program p; procedure q(a: Int32; b: Int32 := 0); begin end; begin q(c => 1); end.",
+     "L0087@1:69 L0089@1:67"},
+    {"program p; procedure q(a: Int32; b: Int32 := 0); begin end; begin q(1, a => 2); end.",
+     "L0088@1:72"},
+    {"program p; procedure q(a: Int32; b: Int32 := 0); begin end; begin q(b => 2); end.",
+     "L0089@1:67"},
+    {"program p; procedure q(a: Int32; b: Int32 := 0); begin end; begin q(A => 2); end.",
+     "L0022@1:69"},
+    {"program p; procedure q(a: Int32; b: Int32 := 0); begin end; begin q(1 + 1 => 2); end.",
+     "L0087@1:71 L0089@1:67"},
+    {"program p; begin writeln(x => 1); end.", "L0090@1:26"},
+    {"program p; var x: Int32; begin x := Int32(v => 1); end.", "L0090@1:43"},
+    {"program p; procedure q(a: Int32; b: Int32 := 0); begin end; begin q(); q(1, 2, 3); end.",
+     "L0035@1:67 L0035@1:72"},
+    {"program p; procedure q(var a: Int32 := 1); begin end; begin end.",
+     "L0091@1:40"},
+    {"program p; procedure q(out a: Int32 := 1); begin a := 2; end; begin end.",
+     "L0091@1:40"},
+    {"program p; procedure q(a: Int32 := 1; b: Int32); begin end; begin end.",
+     "L0091@1:39"},
+    {"program p; procedure q(a: array[Int32 range <>] of Int32 := {1}); begin end; begin end.",
+     "L0091@1:61"},
+    {"program p; var n: Int32 := 3; procedure q(a: Int32 := n); begin end; begin end.",
+     "L0030@1:55"},
+    {"program p; procedure q(a: UInt8 := 300); begin end; begin end.",
+     "L0029@1:36"},
+    {"program p; procedure q(a: Int32 := \"x\"); begin end; begin end.",
+     "L0027@1:36"},
+    {"program p; type R = record x: Int32; end; var v: R; procedure q(a: R := v); begin end; begin end.",
+     "L0030@1:73"},
+    {"program p; type R = record x: Int32; end; const K: R = {x: 1}; procedure q(a: R := K; b: R := {x: 2}; c: String := \"s\"; d: BigInt := 7; e: ^R := nil); begin end; begin q(); end.",
+     ""},
+    {"program p; function f(a: Int32; b: Int32 := 1): Int32; begin return a + b; end; var x: Int32; begin x := f(b => 2); end.",
+     "L0089@1:106"},
 };
 
 static void check_string(const char *src, char **errors)
@@ -1601,7 +1647,19 @@ static const run_case
             {"program p; var t: String := \"\"; function tag(s: String; n: Int32): "
              "String; begin return s & str(n); end; begin for var i: Int32 := 1 to "
              "3 do t := t & tag(\"a\", i); end; writeln(t); end.",
-             "a1a2a3\n", "ok"},
+             "a1a2a3\n", "ok"}, /* arguments by name, evaluated as written;
+                                   default values */
+            {"program p; var t: String := \"\"; function m(s: String; v: Int32): Int32; begin t := t & s; return v; end; procedure d(x, y: Int32; c: String := \"k\"; w: Int32 := 1); begin writeln(x, y, c, w); end; begin d(1, 2); d(1, 2, w => 3); d(y => 2, x => 1, c => \"r\"); d(w => m(\"w\", 4), x => m(\"x\", 5), y => m(\"y\", 6)); writeln(t); end.",
+             "12k1\n12k3\n12r1\n56k4\nwxy\n", "ok"},
+            {"program p; type R = record x, y: Int32; end; const K: R = {x: 1; y: 2}; procedure s(a: R := K; b: R := {x: 7; y: 8}; c: String := \"s\"; d: BigInt := 12345678901234567890; e: ^R := nil; f: Float64 := 0.5); begin writeln(a.x, a.y, b.x, b.y, c, d, e = nil, f); end; begin s(); s(b => {x: 3; y: 4}, a => {x: 5; y: 6}); end.",
+             "1278s12345678901234567890true0.5\n5634s12345678901234567890true0.5\n",
+             "ok"},
+            {"program p; procedure g(out r: Int32; k: Int32 := 5); begin r := k * 2; end; var r: Int32; begin g(r); writeln(r); g(k => 4, r => r); writeln(r); end.",
+             "10\n8\n", "ok"},
+            {"program p; function f(a: Int32; b: Int8 := 100): Int32; begin return a + Int32(b); end; begin writeln(f(1), f(1, b => 27)); end.",
+             "10128\n", "ok"},
+            {"program p; procedure q(a: Int32 range 1..3 := 2); begin writeln(a); end; var v: Int32 := 4; begin q(); q(a => v); end.",
+             "2\n", "trap 101 at 1:104"},
 };
 
 /* an input that cannot be read: a directory (EISDIR) */
@@ -2473,6 +2531,30 @@ static const unit_case unit_cases[] = {
      "true\n",
      "ok",
      "w:L0077@p.luxia:1:17 w:L0077@a.luxia:1:80"},
+    /* default values across a unit: the body repeats the one of the
+       interface (the same constant, an aggregate too), arguments by name
+       from another file */
+    {{{"p.luxia", "program P;\nuses G;\nbegin\n  writeln(Scale(4), \" \", "
+                  "Scale(k => 3, x => 2));\n  Show();\nend P."},
+      {"g.luxia",
+       "unit G;\ninterface\ntype R = record a, b: Int32; end;\nfunction "
+       "Scale(x: Int32; k: Int32 := 2): Int32;\nprocedure Show(r: R := {a: "
+       "1; b: 2});\nimplementation\nfunction Scale(x: Int32; k: Int32 := 2): "
+       "Int32; begin return x * k; end;\nprocedure Show(r: R := {a: 1; b: "
+       "2}); begin writeln(r.a, r.b); end;\nend G."}},
+     "8 6\n12\n",
+     "ok",
+     ""},
+    /* a default value of the body other than the interface's, or missing */
+    {{{"p.luxia", "program P; uses G; begin writeln(F(1)); end."},
+      {"g.luxia", "unit G;\ninterface\nfunction F(x: Int32; k: Int32 := "
+                  "2): Int32;\nfunction H(x: Int32 := 1): Int32;\n"
+                  "implementation\nfunction F(x: Int32; k: Int32 := 3): "
+                  "Int32; begin return x; end;\nfunction H(x: Int32): Int32; "
+                  "begin return x; end;\nend G."}},
+     "",
+     "errors",
+     "L0069@g.luxia:6:10 n:@g.luxia:3:1 L0069@g.luxia:7:10 n:@g.luxia:4:1"},
 };
 
 /* the reader of the files of a case */

@@ -26,7 +26,8 @@ LX_NODE(VAR, "var", "lnn-")          /* names, type, initial value */
 LX_NODE(ROUTINE, "routine", "nlnn")  /* op: procedure or function; name,
                                         parameters, result, body */
 LX_NODE(BODY, "body", "ll--")        /* declarations, statements */
-LX_NODE(PARAM, "param", "ln--")      /* op: 0, var or out; names, type */
+LX_NODE(PARAM, "param", "lnq-")      /* op: 0, var or out; names, type,
+                                        the default value (0: none) */
 /* types */
 LX_NODE(TNAME, "tname", "innq")      /* name, low and high of a range,
                                         the unit that qualifies it (a REF,
@@ -72,6 +73,8 @@ LX_NODE(INDEX, "index", "nn--")
 LX_NODE(DEREF, "deref", "n---")
 LX_NODE(CALL, "call", "nl--")        /* callee, arguments */
 LX_NODE(FMT, "fmt", "nnn-")          /* value:width:decimals */
+LX_NODE(NAMED, "named", "in--")      /* name => value: an argument by
+                                        name (0: not a plain name) */
 LX_NODE(NEW, "new", "n---")          /* the type */
 LX_NODE(AGG, "aggregate", "l---")    /* COMP nodes (§ 6.8); flags: the
                                         separators seen */

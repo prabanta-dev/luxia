@@ -445,7 +445,7 @@ static void token(lexer *L)
         kind = LX_AMP;
         break;
     case '=':
-        kind = LX_EQ;
+        kind = d == '>' ? LX_ARROW : LX_EQ;
         break;
     case '<':
         kind = d == '>' ? LX_NE : d == '=' ? LX_LE : LX_LT;
@@ -515,6 +515,7 @@ static void token(lexer *L)
     case LX_GE:
     case LX_ASSIGN:
     case LX_DOTDOT:
+    case LX_ARROW:
         L->pos += 2;
         break;
     default:

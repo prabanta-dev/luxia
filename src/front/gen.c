@@ -263,6 +263,12 @@ typedef struct {
     v128 lit;
     uint32_t var, fn, a, b, c, args, nargs;
     uint32_t line, col; /* where a run-time error here is reported */
+    /* E_CALL: when named, args are written in the order of pmap (the
+       parameter of each, a list), the first npos by position, the others
+       name => value; the parameters missing take their default value */
+    bool named;
+    uint8_t npos;
+    uint32_t pmap;
 } xe;
 
 enum {
@@ -319,6 +325,9 @@ typedef struct {
     uint32_t nline, ncol; /* the name it declares */
     uint32_t iline, icol; /* the [ or the . of its target */
     uint32_t fld;         /* a field of the target, plus 1; 0 for none */
+    bool named;           /* S_CALL: as in xe */
+    uint8_t npos;
+    uint32_t pmap;
 } xs;
 
 typedef struct {
@@ -360,6 +369,8 @@ typedef struct {
     bool sealed;
     uint32_t rt;
     uint32_t par[4];
+    uint32_t def[4]; /* the default value of each parameter, 0 for none:
+                        a literal, on the last parameters only */
     uint8_t np;
     uint32_t blk, nblk;
 } xr;
@@ -1040,12 +1051,68 @@ static uint32_t field_ref(G *g, uint32_t v, uint32_t f);
 static uint32_t field_type(const G *g, uint32_t rt, uint32_t f);
 static int pick_typed(G *g, uint32_t t, bool write);
 
+/* how a call of fn writes its arguments (Luxia 1, step 1): omit[k] for
+   the parameters left to their default value, and named when some go by
+   name. Without names only the last ones are left out */
+static bool plan_omit(G *g, uint32_t fn, bool *omit)
+{
+    const xr *r = &g->r[fn];
+    bool any = false;
+    for (uint32_t k = 0; k < r->np; k++) {
+        omit[k] = false;
+        any |= r->def[k] != 0;
+    }
+    bool named = r->np && chance(g, any ? 50 : 25);
+    if (named) {
+        for (uint32_t k = 0; k < r->np; k++)
+            omit[k] = r->def[k] && chance(g, 50);
+    } else {
+        for (uint32_t k = r->np; k > 0 && r->def[k - 1] && chance(g, 50); k--)
+            omit[k - 1] = true;
+    }
+    return named;
+}
+
+/* the order the arguments are written in: the parameters not omitted,
+   the first npos by position from the first parameter, the others by
+   name in any order; the arguments a (by parameter) into w, in it */
+static uint32_t plan_order(G *g, uint32_t fn, const bool *omit, bool named,
+                           const uint32_t *a, uint32_t *order, uint32_t *w,
+                           uint8_t *npos)
+{
+    uint32_t n = 0;
+    for (uint32_t k = 0; k < g->r[fn].np; k++)
+        if (!omit[k])
+            order[n++] = k;
+    *npos = (uint8_t)n;
+    if (named) {
+        uint32_t pre = 0;
+        while (pre < n && order[pre] == pre)
+            pre++;
+        *npos = (uint8_t)below(g, pre + 1);
+        for (uint32_t i = n; i-- > (uint32_t)*npos + 1;) {
+            uint32_t j = *npos + below(g, i - *npos + 1), t = order[i];
+            order[i] = order[j];
+            order[j] = t;
+        }
+    }
+    for (uint32_t i = 0; i < n; i++)
+        w[i] = a[order[i]];
+    return n;
+}
+
 static uint32_t call_expr(G *g, uint32_t fn, int d)
 {
+    bool omit[4];
+    bool named = plan_omit(g, fn, omit);
     uint32_t a[4];
     uint32_t np = g->r[fn].np;
     for (uint32_t k = 0; k < np; k++) {
         uint32_t pt = g->v[g->r[fn].par[k]].t;
+        if (omit[k]) {
+            a[k] = 0;
+            continue;
+        }
         if (g->ty[pt].k == K_OPEN) {
             /* the array its type came from is a global: always there; or
                an aggregate, read only */
@@ -1070,11 +1137,17 @@ static uint32_t call_expr(G *g, uint32_t fn, int d)
     uint32_t rt = g->r[fn].rt;
     uint32_t hidden =
         is_record(g, rt) || is_array(g, rt) ? new_v(g, rt, V_LOCAL) : 0;
+    uint32_t order[4], w[4];
+    uint8_t npos;
+    uint32_t nw = plan_order(g, fn, omit, named, a, order, w, &npos);
     uint32_t i = new_e(g, E_CALL, rt);
     g->e[i].fn = fn;
-    g->e[i].args = keep_list(g, a, np);
-    g->e[i].nargs = np;
+    g->e[i].args = keep_list(g, w, nw);
+    g->e[i].nargs = nw;
     g->e[i].var = hidden;
+    g->e[i].named = named;
+    g->e[i].npos = npos;
+    g->e[i].pmap = keep_list(g, order, nw);
     return i;
 }
 
@@ -3534,11 +3607,14 @@ static uint32_t stmt(G *g, uint32_t *out)
                 fn = i;
         if (n) {
             uint32_t a[4];
-            bool ok = true;
+            bool ok = true, omit[4];
+            bool named = plan_omit(g, fn, omit);
             for (uint32_t k = 0; k < g->r[fn].np && ok; k++) {
                 uint32_t p = g->r[fn].par[k];
                 uint32_t pt = g->v[p].t;
-                if (g->ty[pt].k == K_OPEN) {
+                if (omit[k]) {
+                    a[k] = 0;
+                } else if (g->ty[pt].k == K_OPEN) {
                     int v = pick_argument(g, pt, g->v[p].kind == V_VAR);
                     if (g->v[p].kind == V_IN && chance(g, 40))
                         a[k] = agg_literal(g, pt, 1);
@@ -3577,10 +3653,17 @@ static uint32_t stmt(G *g, uint32_t *out)
                 }
             }
             if (ok) {
+                uint32_t order[4], w[4];
+                uint8_t npos;
+                uint32_t nw =
+                    plan_order(g, fn, omit, named, a, order, w, &npos);
                 uint32_t s = new_s(g, S_CALL);
                 g->st[s].fn = fn;
-                g->st[s].args = keep_list(g, a, g->r[fn].np);
-                g->st[s].nargs = g->r[fn].np;
+                g->st[s].args = keep_list(g, w, nw);
+                g->st[s].nargs = nw;
+                g->st[s].named = named;
+                g->st[s].npos = npos;
+                g->st[s].pmap = keep_list(g, order, nw);
                 out[0] = s;
                 /* what came back through an out parameter, printed */
                 for (uint32_t k = 0; k < g->r[fn].np; k++)
@@ -3766,6 +3849,16 @@ static void routine(G *g)
         g->r[id].par[k] = p;
         if (!out)
             show(g, p);
+    }
+    /* the last parameters sometimes with a default value, a literal
+       (Luxia 1, step 1): only without a mode and on a scalar */
+    for (uint32_t k = g->r[id].np; k-- > 0;) {
+        uint32_t p = g->r[id].par[k], t = g->v[p].t;
+        if (g->v[p].kind != V_IN || !is_scalar(g, t) || is_ptr(g, t) ||
+            !chance(g, 30))
+            break;
+        uint32_t e = lit(g, t, init_value(g, t));
+        g->r[id].def[k] = e;
     }
     g->cur = (int)id;
     /* every out parameter is given a value first, from what is visible
@@ -4030,6 +4123,9 @@ static void put_lit(text *o, const G *g, uint32_t t, v128 v)
     }
 }
 
+static void pcall_args(G *g, text *o, uint32_t fn, uint32_t args, uint32_t n,
+                       bool named, uint32_t npos, uint32_t pmap);
+
 static void pexpr(G *g, text *o, uint32_t i)
 {
     xe *x = &g->e[i];
@@ -4070,13 +4166,7 @@ static void pexpr(G *g, text *o, uint32_t i)
     case E_CALL:
         here(x, o);
         put_rname(o, g, x->fn);
-        put(o, "(");
-        for (uint32_t k = 0; k < g->e[i].nargs; k++) {
-            if (k)
-                put(o, ", ");
-            pexpr(g, o, g->ls[g->e[i].args + k]);
-        }
-        put(o, ")");
+        pcall_args(g, o, x->fn, x->args, x->nargs, x->named, x->npos, x->pmap);
         break;
     case E_INDEX:
     case E_HIDX:
@@ -4258,6 +4348,24 @@ static void indent(text *o, int ind)
         put(o, "  ");
 }
 
+/* the arguments of a call of fn as written: the first npos by position,
+   when named the others name => value */
+static void pcall_args(G *g, text *o, uint32_t fn, uint32_t args, uint32_t n,
+                       bool named, uint32_t npos, uint32_t pmap)
+{
+    put(o, "(");
+    for (uint32_t k = 0; k < n; k++) {
+        if (k)
+            put(o, ", ");
+        if (named && k >= npos) {
+            put_name(o, g, g->r[fn].par[g->ls[pmap + k]]);
+            put(o, " => ");
+        }
+        pexpr(g, o, g->ls[args + k]);
+    }
+    put(o, ")");
+}
+
 static void pargs(G *g, text *o, uint32_t args, uint32_t n)
 {
     put(o, "(");
@@ -4405,7 +4513,7 @@ static void pstmt(G *g, text *o, uint32_t si, int ind)
         break;
     case S_CALL:
         put_rname(o, g, s.fn);
-        pargs(g, o, s.args, s.nargs);
+        pcall_args(g, o, s.fn, s.args, s.nargs, s.named, s.npos, s.pmap);
         put(o, ";\n");
         break;
     case S_EXIT:
@@ -4580,6 +4688,10 @@ static void routine_text(G *g, text *o, uint32_t r, bool heading)
         put_name(o, g, p);
         put(o, ": ");
         put_type(o, g, g->v[p].t);
+        if (x->def[k]) {
+            put(o, " := ");
+            pexpr(g, o, x->def[k]);
+        }
     }
     put(o, ")");
     if (x->func) {
@@ -5195,13 +5307,26 @@ static v128 ev(X *x, uint32_t i);
 
 /* the arguments from left to right, each checked at the call at */
 static v128 call(X *x, uint32_t fn, uint32_t args, uint32_t nargs,
-                 uint32_t line, uint32_t col)
+                 uint32_t pmap, uint32_t line, uint32_t col)
 {
     G *g = x->g;
     v128 val[4];
     uint32_t target[4];
-    for (uint32_t k = 0; k < nargs; k++) {
-        uint32_t a = g->ls[args + k], p = g->r[fn].par[k];
+    bool given[4] = {false, false, false, false};
+    /* the arguments in the order written (pmap: the parameter of each),
+       then the default values of the parameters left out (literals) */
+    for (uint32_t w = 0; w < g->r[fn].np; w++) {
+        uint32_t k, a;
+        if (w < nargs) {
+            k = g->ls[pmap + w];
+            a = g->ls[args + w];
+        } else {
+            for (k = 0; given[k]; k++)
+                ;
+            a = g->r[fn].def[k];
+        }
+        given[k] = true;
+        uint32_t p = g->r[fn].par[k];
         if (g->ty[g->v[p].t].k == K_OPEN) {
             if (g->e[a].k == E_AGG)
                 ev(x, a);            /* into its hidden variable, in order */
@@ -5221,7 +5346,7 @@ static v128 call(X *x, uint32_t fn, uint32_t args, uint32_t nargs,
         if (x->trap)
             return 0;
     }
-    for (uint32_t k = 0; k < nargs; k++) {
+    for (uint32_t k = 0; k < g->r[fn].np; k++) {
         uint32_t p = g->r[fn].par[k];
         if (g->ty[g->v[p].t].k == K_OPEN) {
             uint32_t a = target[k];
@@ -5246,7 +5371,7 @@ static v128 call(X *x, uint32_t fn, uint32_t args, uint32_t nargs,
     run_block(x, g->r[fn].blk, g->r[fn].nblk);
     x->rt = outer;
     if (!x->trap) /* the out parameters go back, in order */
-        for (uint32_t k = 0; k < nargs; k++) {
+        for (uint32_t k = 0; k < g->r[fn].np; k++) {
             uint32_t p = g->r[fn].par[k];
             if (g->v[p].kind == V_OUT)
                 x->cell[target[k]] = x->cell[x->ref[p]];
@@ -5916,7 +6041,7 @@ static v128 ev(X *x, uint32_t i)
         return k >= 1 && k <= g->narg ? g->arg[k - 1] : fail(x, i, 101);
     }
     case E_CALL: {
-        v128 r = call(x, e->fn, e->args, e->nargs, e->line, e->col);
+        v128 r = call(x, e->fn, e->args, e->nargs, e->pmap, e->line, e->col);
         if (x->trap || !(is_record(g, e->t) || is_array(g, e->t)))
             return r;
         /* a record or an array: the cells returned, copied at once to the
@@ -6368,7 +6493,7 @@ static int run_stmt(X *x, uint32_t si)
         put(&x->out, "\n");
         return X_NEXT;
     case S_CALL:
-        call(x, s->fn, s->args, s->nargs, s->line, s->col);
+        call(x, s->fn, s->args, s->nargs, s->pmap, s->line, s->col);
         return x->trap ? X_RET : X_NEXT;
     case S_EXIT:
     case S_CONT:

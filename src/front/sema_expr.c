@@ -746,6 +746,65 @@ static void check_format(limba_lxs *S, uint32_t list)
     }
 }
 
+/* an argument a of a routine for parameter p: its type, its mode */
+static void routine_arg(limba_lxs *S, uint32_t a, uint32_t scope, limba_param p)
+{
+    char ta[128], tb[128];
+    if (kind(S, p.type) == LIMBA_LTK_OPEN) {
+        /* the same elements, an index of the same base (§ 4.5); an
+           aggregate takes its bounds from the parameter (§ 6.8) */
+        limba_ltype at =
+            lxs_expr(S, a, scope, lxs_node(S, a)->kind == LXN_AGG ? p.type : 0);
+        unsigned ak = at ? kind(S, at) : 0;
+        const limba_typeinfo *pt = lxs_ty(S, p.type);
+        if (at &&
+            !((ak == LIMBA_LTK_ARRAY || ak == LIMBA_LTK_OPEN) &&
+              lxs_compatible(S, lxs_ty(S, at)->elem, pt->elem) &&
+              lxs_base(S, lxs_ty(S, at)->index) == lxs_base(S, pt->index)))
+            lxs_error(S, LXE_TYPE_MISMATCH, a,
+                      "this is %s, the parameter is %s", lxs_tname(S, at, ta),
+                      lxs_tname(S, p.type, tb));
+        else if (at && ak == LIMBA_LTK_ARRAY &&
+                 !(lxs_ty(S, at)->flags & LIMBA_TF_DYNAMIC) &&
+                 (lxs_ty(S, pt->index)->flags & LIMBA_TF_RANGE)) {
+            /* bounds known now: those of a non-empty array must
+               belong to the index of the parameter */
+            const limba_typeinfo *ai = lxs_ty(S, lxs_ty(S, at)->index);
+            const limba_typeinfo *pi = lxs_ty(S, pt->index);
+            if (ai->lo <= ai->hi && (ai->lo < pi->lo || ai->hi > pi->hi))
+                lxs_error(S, LXE_CONST_RANGE, a,
+                          "the bounds of this array are past %s",
+                          lxs_tname(S, pt->index, tb));
+        }
+    } else if (p.mode == LXS_IN) {
+        lxs_expr(S, a, scope, p.type);
+        lxs_assign_to(S, a, p.type, "the parameter");
+        pointer_arg(S, a, LXS_IN);
+        return;
+    } else {
+        limba_ltype at =
+            lxs_expr(S, a, scope, lxs_node(S, a)->kind == LXN_AGG ? p.type : 0);
+        if (at && !untyped(S, at) && !lxs_compatible(S, at, p.type))
+            lxs_error(S, LXE_TYPE_MISMATCH, a,
+                      "this is %s, the parameter is %s", lxs_tname(S, at, ta),
+                      lxs_tname(S, p.type, tb));
+    }
+    if (p.mode == LXS_IN || lxs_writable(S, a, true))
+        pointer_arg(S, a, p.mode);
+}
+
+/* an argument that is no argument of the routine: still checked */
+static void stray_arg(limba_lxs *S, uint32_t a, uint32_t scope)
+{
+    if (lxs_node(S, a)->kind == LXN_NAMED)
+        a = lxs_node(S, a)->b;
+    lxs_expr(S, a, scope, 0);
+}
+
+/* a call of a routine of the program: the arguments by position first,
+   then by name (name => value), each parameter once; those not given
+   take their default value. The argument of each parameter is kept in
+   argmap when a name or a default value is used */
 static limba_ltype routine_call(limba_lxs *S, uint32_t node, uint32_t scope,
                                 limba_sym s)
 {
@@ -755,7 +814,7 @@ static limba_ltype routine_call(limba_lxs *S, uint32_t node, uint32_t scope,
     limba_ltype sig = S->st.sym[s].type;
     if (!sig) {
         for (uint32_t i = 0; i < nargs; i++)
-            lxs_expr(S, limba_lx_list_at(S->t, args, i), scope, 0);
+            stray_arg(S, limba_lx_list_at(S->t, args, i), scope);
         return set(S, node, 0);
     }
     const limba_typeinfo *ti = lxs_ty(S, sig);
@@ -763,59 +822,119 @@ static limba_ltype routine_call(limba_lxs *S, uint32_t node, uint32_t scope,
     limba_ltype result = ti->elem;
     size_t n;
     const char *sp = lxs_spell(S, s, &n);
-    if (nargs != count)
-        lxs_error(S, LXE_ARG_COUNT, node, "'%.*s' takes %u argument%s, not %u",
-                  (int)n, sp, count, count == 1 ? "" : "s", nargs);
+    /* the parameters from the declaration: the PARAM and the name of
+       each */
+    uint32_t *pnode = limba_xcalloc(count + 1, sizeof(*pnode));
+    uint32_t *pname = limba_xcalloc(count + 1, sizeof(*pname));
+    uint32_t *given = limba_xcalloc(count + 1, sizeof(*given));
+    uint32_t plist = lxs_node(S, S->st.sym[s].node)->b, k = 0;
+    for (uint32_t i = 0; i < lxs_node(S, plist)->b; i++) {
+        uint32_t p = limba_lx_list_at(S->t, plist, i);
+        uint32_t names = lxs_node(S, p)->a;
+        for (uint32_t j = 0; j < lxs_node(S, names)->b && k < count; j++) {
+            pnode[k] = p;
+            pname[k++] = limba_lx_list_at(S->t, names, j);
+        }
+    }
+    uint32_t npos = 0, required = count, written = 0;
+    bool named = false, any_named = false;
+    for (uint32_t j = 0; j < count; j++)
+        if (pnode[j] && lxs_node(S, pnode[j])->c) {
+            required = j;
+            break;
+        }
+    for (uint32_t i = 0; i < nargs; i++) {
+        if (lxs_node(S, limba_lx_list_at(S->t, args, i))->kind == LXN_NAMED)
+            any_named = true;
+        else
+            written++;
+    }
+    if (written > count || (!any_named && written < required)) {
+        if (required == count)
+            lxs_error(S, LXE_ARG_COUNT, node,
+                      "'%.*s' takes %u argument%s, not %u", (int)n, sp, count,
+                      count == 1 ? "" : "s", written);
+        else
+            lxs_error(S, LXE_ARG_COUNT, node,
+                      "'%.*s' takes %u to %u arguments, not %u", (int)n, sp,
+                      required, count, written);
+    }
     for (uint32_t i = 0; i < nargs; i++) {
         uint32_t a = limba_lx_list_at(S->t, args, i);
-        if (i >= count) {
-            lxs_expr(S, a, scope, 0);
-            continue;
-        }
-        limba_param p = S->ts.param[first + i];
-        char ta[128], tb[128];
-        if (kind(S, p.type) == LIMBA_LTK_OPEN) {
-            /* the same elements, an index of the same base (§ 4.5); an
-               aggregate takes its bounds from the parameter (§ 6.8) */
-            limba_ltype at = lxs_expr(
-                S, a, scope, lxs_node(S, a)->kind == LXN_AGG ? p.type : 0);
-            unsigned ak = at ? kind(S, at) : 0;
-            const limba_typeinfo *pt = lxs_ty(S, p.type);
-            if (at &&
-                !((ak == LIMBA_LTK_ARRAY || ak == LIMBA_LTK_OPEN) &&
-                  lxs_compatible(S, lxs_ty(S, at)->elem, pt->elem) &&
-                  lxs_base(S, lxs_ty(S, at)->index) == lxs_base(S, pt->index)))
-                lxs_error(S, LXE_TYPE_MISMATCH, a,
-                          "this is %s, the parameter is %s",
-                          lxs_tname(S, at, ta), lxs_tname(S, p.type, tb));
-            else if (at && ak == LIMBA_LTK_ARRAY &&
-                     !(lxs_ty(S, at)->flags & LIMBA_TF_DYNAMIC) &&
-                     (lxs_ty(S, pt->index)->flags & LIMBA_TF_RANGE)) {
-                /* bounds known now: those of a non-empty array must
-                   belong to the index of the parameter */
-                const limba_typeinfo *ai = lxs_ty(S, lxs_ty(S, at)->index);
-                const limba_typeinfo *pi = lxs_ty(S, pt->index);
-                if (ai->lo <= ai->hi && (ai->lo < pi->lo || ai->hi > pi->hi))
-                    lxs_error(S, LXE_CONST_RANGE, a,
-                              "the bounds of this array are past %s",
-                              lxs_tname(S, pt->index, tb));
+        limba_lx_node *ax = lxs_node(S, a);
+        if (ax->kind != LXN_NAMED) {
+            if (named) {
+                lxs_error(S, LXE_ARG_ORDER, a,
+                          "an argument by position after one by name: "
+                          "those by position come first");
+                stray_arg(S, a, scope);
+            } else if (npos >= count) {
+                stray_arg(S, a, scope);
+            } else {
+                given[npos] = a;
+                routine_arg(S, a, scope, S->ts.param[first + npos]);
             }
-        } else if (p.mode == LXS_IN) {
-            lxs_expr(S, a, scope, p.type);
-            lxs_assign_to(S, a, p.type, "the parameter");
-            pointer_arg(S, a, LXS_IN);
+            npos++;
             continue;
-        } else {
-            limba_ltype at = lxs_expr(
-                S, a, scope, lxs_node(S, a)->kind == LXN_AGG ? p.type : 0);
-            if (at && !untyped(S, at) && !lxs_compatible(S, at, p.type))
-                lxs_error(S, LXE_TYPE_MISMATCH, a,
-                          "this is %s, the parameter is %s",
-                          lxs_tname(S, at, ta), lxs_tname(S, p.type, tb));
         }
-        if (p.mode == LXS_IN || lxs_writable(S, a, true))
-            pointer_arg(S, a, p.mode);
+        named = true;
+        uint32_t v = ax->b, name = ax->a, j = 0;
+        while (j < count &&
+               !(name && pname[j] && lxs_node(S, pname[j])->a == name))
+            j++;
+        const char *use = lxs_text_at(S, ax->loc);
+        uint32_t ul = lxs_ident_len(use);
+        if (!name) {
+            lxs_error(S, LXE_ARG_NAME, a,
+                      "before => goes the name of a parameter");
+            stray_arg(S, a, scope);
+            continue;
+        }
+        if (j == count) {
+            lxs_error(S, LXE_ARG_NAME, a, "'%.*s' has no parameter '%.*s'",
+                      (int)n, sp, (int)ul, use);
+            stray_arg(S, a, scope);
+            continue;
+        }
+        const char *decl = lxs_text_at(S, lxs_node(S, pname[j])->loc);
+        uint32_t dl = lxs_ident_len(decl);
+        if (dl == ul && memcmp(decl, use, ul) != 0)
+            lxs_error(S, LXE_SPELLING, a,
+                      "'%.*s' is declared as '%.*s': write it the same way",
+                      (int)ul, use, (int)dl, decl);
+        if (given[j]) {
+            lxs_error(S, LXE_ARG_TWICE, a,
+                      "the parameter '%.*s' is given twice", (int)dl, decl);
+            stray_arg(S, a, scope);
+            continue;
+        }
+        given[j] = v;
+        routine_arg(S, v, scope, S->ts.param[first + j]);
     }
+    if (named && npos <= count) {
+        for (uint32_t j = 0; j < count; j++)
+            if (!given[j] && j < required) {
+                const char *decl =
+                    pname[j] ? lxs_text_at(S, lxs_node(S, pname[j])->loc) : "";
+                lxs_error(S, LXE_ARG_MISSING, node,
+                          "the parameter '%.*s' of '%.*s' has no argument",
+                          (int)lxs_ident_len(decl), decl, (int)n, sp);
+            }
+    }
+    if (named || npos < count) {
+        /* the argument of each parameter, its default value if none */
+        S->argmap[node] = S->nargpool + 1;
+        for (uint32_t j = 0; j < count; j++) {
+            uint32_t v = given[j];
+            if (!v && pnode[j])
+                v = lxs_node(S, pnode[j])->c;
+            LIMBA_GROW(S->argpool, S->nargpool, S->capargpool);
+            S->argpool[S->nargpool++] = v;
+        }
+    }
+    free(pnode);
+    free(pname);
+    free(given);
     return set(S, node, result);
 }
 
@@ -1895,6 +2014,13 @@ limba_ltype lxs_expr(limba_lxs *S, uint32_t node, uint32_t scope,
     }
     case LXN_AGG:
         return aggregate(S, node, scope, expected);
+    case LXN_NAMED:
+        /* by name only in the calls of the routines of the program */
+        lxs_error(S, LXE_NAMED_PLACE, node,
+                  "an argument by name (name => value) goes only to a "
+                  "routine of the program, not to one of the language nor "
+                  "to a conversion");
+        return set(S, node, lxs_expr(S, x->b, scope, expected));
     case LXN_FMT:
         if (!S->sym[node])
             lxs_error(
