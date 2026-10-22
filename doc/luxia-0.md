@@ -67,14 +67,15 @@ with a different spelling is an error. Luxia thus has Pascal's tolerance
 and the consistency of a case-sensitive language.
 
 A name predefined by the language (types, constants, routines of the
-library, § 9) cannot be declared again.
+library, § 9) cannot be declared again; `str` takes more meanings with
+`overload` (§ 9.4).
 
 ### 2.3 Keywords
 
 Keywords are reserved, English, and **lowercase only**. By the case rule
 above, `BEGIN` is an error, not an identifier.
 
-The 51 keywords are:
+The 52 keywords are:
 
 ```
 abs            and            array          begin          case
@@ -83,11 +84,11 @@ else           elsif          end            exit           external
 false          for            function       if             implementation
 in             interface      loop           mod            new
 nil            not            of             or             out
-pragma         procedure      program        range          record
-rem            repeat         return         shl            shr
-then           to             true           type           unit
-until          uses           var            when           while
-xor
+overload       pragma         procedure      program        range
+record         rem            repeat         return         shl
+shr            then           to             true           type
+unit           until          uses           var            when
+while          xor
 ```
 
 `true`, `false` and `nil` are keywords (literals), not predefined names.
@@ -780,7 +781,8 @@ end Same;
   bounds: an `array[Int32 range 5..9]` and an `array[Int32 range 1..5]`
   with the same five elements, passed to `s` and `t`, are equal. Arrays
   of different lengths are not equal; two empty arrays are equal.
-- Each component is compared with the `=` of its type, at every depth:
+- Each component is compared with the `=` of its type, at every depth,
+  the one a program gives the type if any (§ 6.9):
   reals with the `=` of reals, so `-0.0 = 0.0` and a NaN is equal to
   nothing; strings and `BigInt` values by value; pointers by address
   (the objects they point to are not compared); C types by their
@@ -991,6 +993,53 @@ An **aggregate** writes a whole record or array value between braces.
 - An aggregate may be an operand of `=` and `<>`, typed by the other
   operand (§ 6.2): `if v = {x: 0.0; y: 0.0; z: 0.0} then`.
 
+### 6.9 Operators defined by a program
+
+A program gives an operator a meaning for its own types with a function
+whose name is the operator between quotes, as in Ada:
+
+```pascal
+function "+"(a, b: Vector): Vector;
+function "*"(k: Float64; v: Vector): Vector;
+function "-"(v: Vector): Vector;           // unary minus
+function "="(a, b: Money): Boolean;        // <> follows from it
+function "<"(a, b: Money): Boolean;        // > does not
+```
+
+- **The operators that can be defined**: the binary `+ - * / div mod
+  rem ** & shl shr xor` and `= < <= > >=`, the unary `+ - not abs`.
+  `and` and `or` cannot be defined (they always short-circuit, § 6.4, and
+  a function receives its operands evaluated), nor `in`, nor `<>`.
+- **`<>`** is `not (a = b)`, with the `=` chosen for those operands; it
+  is never declared.
+- An operator has the **number of operands** of its kind: `+` and `-`
+  are unary with one parameter and binary with two. Its precedence and
+  associativity are those of § 6.1: `a < b < c` stays an error.
+- The parameters have **no mode and no default value**. The result of
+  `= < <= > >=` is a `Boolean`; the other operators give any type.
+- The operands have the types declared: the rule of the same type
+  (§ 6.2) is that of the predefined operators. At least one operand has
+  a type declared by the program, never only types of the language.
+- **Where it stands**: in the same part of a file (the program, the
+  interface or the implementation of a unit) as the type of one of its
+  operands; for a type of an interface, in that interface. An operator
+  has no `overload` and is not called by name (`"+"(a, b)` is not a
+  call): it is written between its operands.
+- **Where it holds**: everywhere values of that type are, also in a file
+  that does not use the unit of the type. A type has one `=` only,
+  wherever it is compared.
+- **Choice**: `a op b` is resolved as a call with two arguments by
+  position (§ 8.8) among the predefined operator, when it applies, and
+  the operators declared with the types of the operands. A constant
+  without a type goes to each type of its kind; an aggregate takes the
+  type of the other operand.
+- **The `=` of a type composes**: the `=` of records and arrays (§ 6.2)
+  compares each component with the `=` of its type, the one a program
+  defined if any, at any depth, also for elements of arrays and for
+  distinct scalar types; the order and the stop at the first difference
+  stay those of § 6.2. `case` and `in` compare values and do not call
+  it.
+
 ## 7. Statements
 
 Every structured statement closes with `end` (as in Modula-2): there is
@@ -1135,7 +1184,7 @@ A routine can be used before its definition in the same file, with no
 
 ### 8.4 Not in Luxia 0
 
-No overloading, no nested routines.
+No nested routines. Overloading: § 8.8.
 
 ### 8.5 External routines
 
@@ -1251,15 +1300,66 @@ Draw(y => 20, x => 10, colour => Red);
 - The names of the parameters of a routine of an interface are part of
   what the unit offers (§ 11.2): a program may name them.
 
+### 8.8 Overloading
+
+Two routines of the same file may have the same name when both say
+`overload` after their heading:
+
+```pascal
+function Max(a, b: Int32): Int32; overload;
+function Max(a, b: Float64): Float64; overload;
+procedure Show(v: Vector); overload;
+procedure Show(v: Vector; width: Int32); overload;
+```
+
+- **`overload` is required** on every routine of the program, or of a
+  unit (interface and implementation together), that has the name of
+  another one there; it stands right after the `;` of the heading,
+  before `external` and before the declarations of the body. One alone
+  is a warning. Functions and procedures may share a name.
+- **Told apart by position**: two routines of one name are a
+  compile-time error at the second if a number `k` of arguments by
+  position goes to both (between their parameters without a default
+  value and all their parameters) for which their first `k` parameters
+  have, pair by pair, the same type. Names never tell them apart, nor
+  modes (a variable goes to a parameter of any mode); two subtypes of
+  one type are the same type, two distinct types (`new`, § 3.5) are not;
+  an open array is the type of the arguments it takes (§ 3.7.1).
+- **Choice of a call**: a routine of the name is a **candidate** when
+  the call fits it by the rules of § 8.6 and § 8.7 and each argument
+  goes to its parameter:
+  - an expression with a type, to a parameter of that type (its
+    subtypes included); there are no implicit conversions;
+  - a constant without a type, **by kind, not by value**: an integer to
+    every integer type, `BigInt` and the reals; a real to the reals; a
+    string to `String` (to `Char` too when it is one character); its
+    value is checked after the choice;
+  - `nil` to every pointer; an aggregate to every record or array its
+    components fit by form;
+  - an argument of a `var` or `out` parameter is a variable of its type.
+
+  The call goes to the **only** candidate. None is an error that lists
+  the routines of the name; more than one is an ambiguity, also when
+  the arguments are by name. **The type of the result never chooses**,
+  nor does the place of the call: `var x: Float64 := Max(1, 2)` is
+  ambiguous; `Max(Int32(1), 2)` is not.
+- An **external** routine of a name with more meanings names its C
+  symbol with `name` (§ 8.5).
+- In units, the routines of one name that come from several units of
+  the same level, all with `overload`, are one name (§ 11.3).
+
 ## 9. The predefined library
 
-The names of the library are visible everywhere and cannot be redeclared
-in Luxia 0.
+The names of the library are visible everywhere and cannot be
+redeclared, except `str`, to which a program adds meanings for its types
+(§ 9.4).
 
 ### 9.1 Output
 
 - `write(...)` and `writeln(...)` take any number of arguments; each is a
-  number, a `Boolean`, a `Char` or a `String`. `writeln` ends the line.
+  number, a `Boolean`, a `Char` or a `String`, or a value of a type for
+  which a `str` is declared (§ 9.4), written as the string it gives (a
+  width applies to that string). `writeln` ends the line.
   Enumerations and pointers cannot be written (an enumeration is written
   through `ord`).
 - Integers are written in decimal, a `BigInt` with all its digits; a
@@ -1356,7 +1456,10 @@ anything is read.
   `count < 0` is a **range error**; past the end the result is truncated, as in Pascal: `copy("abc", 3, 5) = "c"`,
   `copy("abc", 5, 1) = ""`.
 - `str(x)`: `x` as a string, written as `write` writes it without a format
-  (§ 9.1).
+  (§ 9.1). A program or a unit adds a `str` for a type of its own
+  (record, array, enumeration, distinct type, pointer) with
+  `function str(x: T): String; overload;`, one parameter without a mode;
+  `write` and `writeln` then write values of `T` with it.
 - `val(s, var x): Boolean`: reads the number written in `s` into the
   numeric variable `x`. The rules:
   - `s` must follow **the syntax of a Luxia literal** (§ 2.4): `_` only
@@ -1780,13 +1883,15 @@ end Geometry.
   interface declares is visible in the implementation without being
   repeated.
 - Every routine of the interface has its body in the implementation;
-  a missing body is a compile-time error. The heading of the body
-  **conforms** to that of the interface, as in Ada:
+  a missing body is a compile-time error. A body is the one of the
+  heading of its name with the same types of the parameters (§ 8.8); a
+  body that is no heading's is a routine of the implementation. The
+  heading of the body **conforms** to that of the interface, as in Ada:
   - **textually for names**: the same kind (`procedure` or
     `function`), the same name of the routine and of the parameters,
     spelt alike, in the same order, with the same modes (none, `var`,
-    `out`); grouping does not matter (`a, b: Vector` and
-    `a: Vector; b: Vector` conform);
+    `out`), and `overload` in both or neither; grouping does not matter
+    (`a, b: Vector` and `a: Vector; b: Vector` conform);
   - **the same default values** (§ 8.6): a parameter with one in the
     interface has the same constant in the body, written there too, and
     one without has none;
@@ -1832,12 +1937,18 @@ end.
   of the same level (below), that use is a compile-time error, which
   asks for the qualified form. Using two units that have names in
   common is not an error; only the ambiguous use is. The order of the
-  `uses` never decides.
+  `uses` never decides. Routines with `overload` are the exception: those
+  of one name from several units of the same level are **one name**, and
+  a call chooses among all of them (§ 8.8); two with the same types of
+  parameters are an ambiguity at a direct use, and `Unit.Name` chooses
+  among those of that unit.
 - **Levels.** Names come from three levels: the declarations of the
   file; the units of the program (§ 11.4); the units of the standard
   library. A name of a level hides the same name of the levels below:
   - a declaration of the file that hides a name of a used unit gets a
-    **warning** on the declaration (`'Sort' hides 'Strings.Sort'`),
+    **warning** on the declaration (`'Sort' hides 'Strings.Sort'`); a
+    routine with `overload` hides only the routines of the unit with the
+    same types of parameters, and with the others it is one name,
     unless the file states it with `pragma hides(Strings.Sort);`,
     among the declarations of the file, anywhere. The pragma covers that
     name of that unit only; a pragma that hides nothing is itself a
@@ -1847,7 +1958,10 @@ end.
     qualified form removes.
   A new name in a unit, or a new unit in the standard library, thus
   never changes the meaning of a program and never stops it from
-  compiling: at most it adds a warning.
+  compiling: at most it adds a warning. One case only stops it, never
+  silently: a new routine with `overload` and other types of parameters
+  joins its name, and a call with a constant without a type that went
+  to one routine may now go to two, an ambiguity (§ 8.8).
 - **A qualifier that names a used unit is always the unit.** If a used
   unit exports a name equal to another used unit (a variable `Text`
   while the file uses the unit `Text`), `Text.X` is `X` of the unit
@@ -1961,8 +2075,9 @@ Unit       = "unit" ident ";"
 Uses       = "uses" ident { "," ident } ";" .
 Decl       = ConstSec | TypeSec | VarSec | Routine | Pragma ";" .
 IntfDecl   = ConstSec | TypeSec | VarSec | Heading | Pragma ";" .
-Heading    = ( "procedure" ident Params | "function" ident Params ":" Type )
-             ";" [ "external" string [ ident string ] ";" ] .
+Heading    = ( "procedure" RName Params | "function" RName Params ":" Type )
+             ";" [ "overload" ";" ] [ "external" string [ ident string ] ";" ] .
+RName      = ident | string .
 Pragma     = "pragma" ident "(" QualIdent { "," QualIdent } ")" .
 QualIdent  = ident [ "." ident ] .
 ConstSec   = "const" ConstDecl ";" { ConstDecl ";" } .
@@ -1972,9 +2087,10 @@ TypeDecl   = ident "=" Type .
 VarSec     = "var" VarDecl ";" { VarDecl ";" } .
 VarDecl    = IdentList ( ":" Type [ ":=" Expr ] | ":=" Expr ) .
 IdentList  = ident { "," ident } .
-Routine    = ( "procedure" ident Params | "function" ident Params ":" Type )
-             ";" ( { LocalDecl } "begin" Stmts "end" [ ident ] ";"
-                 | "external" string [ ident string ] ";" ) .
+Routine    = ( "procedure" RName Params | "function" RName Params ":" Type )
+             ";" [ "overload" ";" ]
+             ( { LocalDecl } "begin" Stmts "end" [ RName ] ";"
+             | "external" string [ ident string ] ";" ) .
 LocalDecl  = ConstSec | TypeSec | VarSec | Pragma ";" .
 Params     = "(" [ Param { ";" Param } ] ")" .
 Param      = [ "var" | "out" ] IdentList ":" Type [ ":=" Expr ] .
@@ -2039,6 +2155,10 @@ unit from a record (§ 11.3). In the interface of a unit a routine is a
 `Heading`: its body, if it is not external, follows in the
 implementation as a `Routine`.
 
+A routine named by a `string` (`RName`) is an operator (§ 6.9): only a
+`function`, and only with the string of an operator that can be
+defined; the semantic analysis checks it.
+
 An `Aggregate` is a record or an array as the type of its context says
 (§ 6.8); the semantic analysis checks the separators (`;` between the
 fields of a record, `,` between the elements of an array) and that the
@@ -2061,7 +2181,7 @@ and tools can anticipate them.
   computed bounds.
 - Assignment of whole open arrays, with a length check.
 - Iteration over the Unicode characters of a string.
-- Redefinition of the names of the predefined library.
+- Redefinition of the names of the predefined library beyond `str`.
 - Types for hardware: bit layout of records, byte order, alignment,
   variables at fixed addresses, volatile access, sizes imposed on
   subtypes.

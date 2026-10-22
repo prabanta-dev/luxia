@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The specification of overloading and of operators defined by a program
+  (§ 6.9, § 8.8; § 9.4 for `str`, § 11.2-11.3 for units; `overload` is
+  the 52nd keyword). Specified only: the compiler does not take them yet.
 - The specification (§ 9.1) says the sign of a negative real in fixed
   notation: `x:0:2` writes `-0.00` for −0.004 and for a negative zero,
   as the output already did; `tests/run/zero`.
