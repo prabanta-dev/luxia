@@ -1175,6 +1175,14 @@ static void printable(limba_lxs *S, uint32_t a, uint32_t scope)
         convert_const(S, a, t == S->ts.uint ? S->ty_int[3] : S->ty_f64);
         return;
     }
+    limba_sym m = S->nops ? lxs_str_of(S, t) : 0;
+    if (m) {
+        /* written by the str the program added for its type (§ 9.4) */
+        S->str_of[a] = m;
+        lxs_use(S, m, a, false);
+        pointer_arg(S, a, LXS_IN);
+        return;
+    }
     unsigned k = kind(S, t);
     if (k != LIMBA_LTK_INT && k != LIMBA_LTK_FLOAT && k != LIMBA_LTK_BOOL &&
         k != LIMBA_LTK_CHAR && k != LIMBA_LTK_STRING && k != LIMBA_LTK_BIGINT) {

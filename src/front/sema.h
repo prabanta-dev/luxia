@@ -246,6 +246,9 @@ typedef struct {
     uint32_t nops, capops, capopk;
     uint32_t *op_pend;
     uint32_t nop_pend, capop_pend;
+    /* per node: the str a program added that writes the argument of
+       write, writeln or str there (§ 9.1, § 9.4) */
+    limba_sym *str_of;
 } limba_lxs;
 
 void limba_lxs_init(limba_lxs *S, limba_lx_ast *t, limba_lx *lx,
@@ -383,6 +386,10 @@ bool lxs_op_is(const limba_lxs *S, limba_sym s);
 limba_sym lxs_op_choose(limba_lxs *S, uint32_t node, unsigned op,
                         const uint32_t *args, uint32_t n, limba_ltype pt,
                         bool *bad);
+/* the str a program added for values of type t, 0 if none (§ 9.4) */
+limba_sym lxs_str_of(limba_lxs *S, limba_ltype t);
+/* is s an operator or a str added: kept in the list ops */
+bool lxs_op_listed(const limba_lxs *S, limba_sym s);
 /* the = a program defined for values of type t, 0 if none */
 limba_sym lxs_op_eq(limba_lxs *S, limba_ltype t);
 /* a whole comparison of type t calls the = of its components: their uses */

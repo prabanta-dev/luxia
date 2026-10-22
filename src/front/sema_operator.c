@@ -46,6 +46,23 @@ static int op_index(limba_lxs *S, uint32_t name_node)
     return -1;
 }
 
+/* the kind of a str a program adds for its types (§ 9.4): kept with
+   the operators, as it holds where the values of its type are */
+#define OPK_STR 255u
+
+/* is d a function str with overload: a str a program adds */
+static bool is_str(limba_lxs *S, uint32_t d)
+{
+    limba_lx_node *x = lxs_node(S, d);
+    limba_lx_node *nx = lxs_node(S, x->a);
+    if (nx->kind != LXN_NAME || (nx->flags & LXN_F_OPNAME) ||
+        !(x->flags & LXN_F_OVERLOAD))
+        return false;
+    limba_sym u = limba_sym_local(&S->st, S->universe, nx->a);
+    return u && S->st.sym[u].kind == LIMBA_LSYM_BUILTIN &&
+           S->st.sym[u].value == LXB_STR;
+}
+
 bool lxs_op_is(const limba_lxs *S, limba_sym s)
 {
     const limba_symbol *y = &S->st.sym[s];
@@ -63,12 +80,13 @@ static limba_sym add_op(limba_lxs *S, uint32_t scope, uint32_t d)
                                    nx->loc, nx->b);
     S->st.sym[s].node = d;
     S->sym[lxs_node(S, d)->a] = s;
-    int k = op_index(S, lxs_node(S, d)->a);
+    int k = (nx->flags & LXN_F_OPNAME) ? op_index(S, lxs_node(S, d)->a) : -1;
     uint32_t n = S->nops;
     LIMBA_GROW(S->ops, S->nops, S->capops);
     LIMBA_GROW(S->opk, n, S->capopk);
     S->ops[S->nops] = s;
-    S->opk[S->nops++] = (uint8_t)(k < 0 ? 0 : defined[k].op);
+    S->opk[S->nops++] =
+        is_str(S, d) ? OPK_STR : (uint8_t)(k < 0 ? 0 : defined[k].op);
     return s;
 }
 
@@ -77,7 +95,7 @@ bool lxs_op_declare(limba_lxs *S, uint32_t scope, uint32_t d, limba_sym *out)
     limba_lx_node *x = lxs_node(S, d);
     limba_lx_node *nx = lxs_node(S, x->a);
     *out = 0;
-    if (nx->kind != LXN_NAME || !(nx->flags & LXN_F_OPNAME))
+    if (nx->kind != LXN_NAME || (!(nx->flags & LXN_F_OPNAME) && !is_str(S, d)))
         return false;
     if (S->nunits && x->d) {
         bool impl;
@@ -170,6 +188,59 @@ static bool relation(unsigned op)
            op == LX_GE;
 }
 
+/* a str added: function str(x: T): String; overload; T a type of the
+   program, the str in the part of the file of T (§ 9.4) */
+static void str_check(limba_lxs *S, uint32_t i)
+{
+    limba_sym s = S->ops[i];
+    const limba_symbol *y = &S->st.sym[s];
+    limba_lx_node *x = lxs_node(S, y->node);
+    limba_ltype sig = y->type;
+    const limba_typeinfo *ti = sig ? lxs_ty(S, sig) : NULL;
+    const char *why = NULL;
+    if (x->op != LX_KW_FUNCTION || !ti || ti->count != 1)
+        why = "a str added is a function of one parameter: function str(x: "
+              "T): String; overload;";
+    else if (lxs_node(S, limba_lx_list_at(S->t, x->b, 0))->op == LX_KW_VAR ||
+             lxs_node(S, limba_lx_list_at(S->t, x->b, 0))->op == LX_KW_OUT ||
+             lxs_node(S, limba_lx_list_at(S->t, x->b, 0))->c)
+        why = "the parameter of a str added has no mode and no default value";
+    else if (!lxs_compatible(S, ti->elem, S->ts.string))
+        why = "a str gives a String";
+    else if (type_scope(S, S->ts.param[ti->first].type) != y->scope)
+        why = "a str is added for a type of the program, where the type is "
+              "declared, in the same part of the file";
+    if (why) {
+        lxs_error(S, LXE_STR_FORM, x->a, "%s", why);
+        return;
+    }
+    for (uint32_t j = 0; j < i; j++)
+        if (S->opk[j] == OPK_STR && lxs_ovl_homograph(S, S->ops[j], s)) {
+            lxs_error(S, LXE_OVERLOAD_CLASH, x->a,
+                      "str is added twice for the same type");
+            lxs_note(S, S->st.sym[S->ops[j]].loc, S->st.sym[S->ops[j]].len,
+                     "the other one");
+            break;
+        }
+}
+
+limba_sym lxs_str_of(limba_lxs *S, limba_ltype t)
+{
+    if (!t)
+        return 0;
+    for (uint32_t i = 0; i < S->nops; i++) {
+        if (S->opk[i] != OPK_STR)
+            continue;
+        limba_sym m = S->ops[i];
+        lxs_force(S, m);
+        limba_ltype sig = S->st.sym[m].type;
+        if (sig && lxs_ty(S, sig)->count == 1 &&
+            lxs_same_param(S, S->ts.param[lxs_ty(S, sig)->first].type, t))
+            return m;
+    }
+    return 0;
+}
+
 void lxs_op_check(limba_lxs *S)
 {
     for (uint32_t i = 0; i < S->nops; i++) {
@@ -179,6 +250,10 @@ void lxs_op_check(limba_lxs *S)
         limba_lx_node *x = lxs_node(S, d);
         uint32_t n;
         const char *sp = op_text(S, s, &n);
+        if (S->opk[i] == OPK_STR) {
+            str_check(S, i);
+            continue;
+        }
         int k = op_index(S, x->a);
         const char *why = NULL;
         char buf[200];
@@ -361,4 +436,12 @@ void lxs_op_uses(limba_lxs *S, limba_ltype t, uint32_t node)
         else
             lxs_op_uses(S, x->elem, node);
     }
+}
+
+bool lxs_op_listed(const limba_lxs *S, limba_sym s)
+{
+    for (uint32_t i = 0; i < S->nops; i++)
+        if (S->ops[i] == s)
+            return true;
+    return false;
 }

@@ -260,7 +260,7 @@ void lxs_ovl_check(limba_lxs *S)
         if (inner[h] || S->st.sym[h].kind != LIMBA_LSYM_ROUTINE)
             continue;
         if (!lxs_ovl_next(S, h)) {
-            if (lxs_ovl_is(S, h) && !lxs_op_is(S, h) && !joins(S, h)) {
+            if (lxs_ovl_is(S, h) && !lxs_op_listed(S, h) && !joins(S, h)) {
                 uint32_t n;
                 const char *sp = name_text(S, h, &n);
                 limba_report_add(S->rep, LIMBA_WARNING, LXE_LONE_OVERLOAD,

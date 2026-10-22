@@ -8,8 +8,11 @@
   the routines of several units, a routine hiding only the one with its
   parameters; in the IR the name of such a routine carries its
   parameters. `overload` is now a keyword: a program that used it as a
-  name renames it. `str` for the types of a program (§ 9.4) is
-  specified, not yet compiled.
+  name renames it.
+- `str` for the types of a program (§ 9.4): `function str(v: Vec):
+  String; overload;` beside the type; `write`, `writeln` and `str` use it
+  wherever values of the type are, a width on the string it gives. Code
+  L0100.
 - Operators defined by a program (§ 6.9): `function "+"(a, b: Vec): Vec`,
   unary and binary, with the type of an operand and valid wherever its
   values are; one with the operands of the predefined operator hides it,

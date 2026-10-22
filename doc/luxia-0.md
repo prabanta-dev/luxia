@@ -1463,7 +1463,9 @@ anything is read.
   (§ 9.1). A program or a unit adds a `str` for a type of its own
   (record, array, enumeration, distinct type, pointer) with
   `function str(x: T): String; overload;`, one parameter without a mode;
-  `write` and `writeln` then write values of `T` with it.
+  `write` and `writeln` then write values of `T` with it. It stands where
+  `T` is declared, in the same part of the file, and holds wherever
+  values of `T` are, as an operator does (§ 6.9).
 - `val(s, var x): Boolean`: reads the number written in `s` into the
   numeric variable `x`. The rules:
   - `s` must follow **the syntax of a Luxia literal** (§ 2.4): `_` only

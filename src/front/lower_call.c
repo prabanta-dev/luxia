@@ -434,14 +434,21 @@ static void lx_write(lxl *L, uint32_t node, bool line)
         uint32_t a = arg(L, node, i);
         const limba_lx_node *x = &L->S->t->node[a];
         if (x->kind != LXN_FMT) {
-            lx_print(L, lxl_value(L, a), L->S->type[a]);
+            if (L->S->str_of[a])
+                lx_print(L, lxl_op_call(L, a, L->S->str_of[a], &a, 1, false),
+                         L->S->ts.string);
+            else
+                lx_print(L, lxl_value(L, a), L->S->type[a]);
             continue;
         }
         uint32_t vn = x->a, wn = x->b, dn = x->c;
         limba_ltype t = L->S->type[vn];
         /* a width from 0, decimals from 0 to 100, each checked where it
            is written, before the next is computed (§ 9) */
-        limba_id v = lxl_value(L, vn), w = lxl_value(L, wn);
+        limba_id v = L->S->str_of[vn]
+                         ? lxl_op_call(L, vn, L->S->str_of[vn], &vn, 1, false)
+                         : lxl_value(L, vn),
+                 w = lxl_value(L, wn);
         limba_id zero = lxl_iconst(L, LIMBA_T_I32, 0);
         lxl_at(L, wn);
         lxl_check(L, icmp(L, LIMBA_CC_SGE, w, zero), LXR_RANGE);
@@ -453,7 +460,7 @@ static void lx_write(lxl *L, uint32_t node, bool line)
                       icmp(L, LIMBA_CC_ULE, d, lxl_iconst(L, LIMBA_T_I32, 100)),
                       LXR_RANGE);
         }
-        uint32_t args[2] = {to_string(L, v, t, d), w};
+        uint32_t args[2] = {L->S->str_of[vn] ? v : to_string(L, v, t, d), w};
         lxl_rt(L, LIMBA_RT_PRINT_STR_W, LIMBA_T_VOID, args, 2);
     }
     if (line)
@@ -620,6 +627,11 @@ static void builtin(lxl *L, uint32_t node, unsigned id, limba_id *result)
         return;
     }
     case LXB_STR:
+        if (S->str_of[a0]) {
+            /* the str the program added for the type (§ 9.4) */
+            *result = lxl_op_call(L, a0, S->str_of[a0], &a0, 1, false);
+            return;
+        }
         *result = to_string(L, lxl_value(L, a0), t0, LIMBA_NONE);
         return;
     case LXB_VAL: {

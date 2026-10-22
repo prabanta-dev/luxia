@@ -981,6 +981,27 @@ static const sema_case sema_cases[] =
          ""},
         {"program p; type V = record x: Int32; end; function \"+\"(a, b: V): V; begin return a; end; var u: V := {x: 1}; begin u := u + {x: 2}; writeln(u.x); end.",
          ""},
+        /* str for the types of a program (Luxia 1, step 2) */
+        {"program p; type V = record x: Int32; end; function str(v: V): String; begin return \"v\"; end; begin end.",
+         "L0023@1:52"},
+        {"program p; type V = record x: Int32; end; procedure str(v: V); overload; begin end; begin end.",
+         "L0100@1:53"},
+        {"program p; type V = record x: Int32; end; function str(v: V; n: Int32): String; overload; begin return \"v\"; end; begin end.",
+         "L0100@1:52"},
+        {"program p; type V = record x: Int32; end; function str(var v: V): String; overload; begin return \"v\"; end; begin end.",
+         "L0100@1:52"},
+        {"program p; type V = record x: Int32; end; function str(v: V): Int32; overload; begin return 1; end; begin end.",
+         "L0100@1:52"},
+        {"program p; function str(v: Int32): String; overload; begin return \"i\"; end; begin end.",
+         "L0100@1:21"},
+        {"program p; type V = record x: Int32; end; function str(v: V): String; overload; begin return \"a\"; end; function str(w: V): String; overload; begin return \"b\"; end; begin end.",
+         "L0094@1:113 L0000@1:52"},
+        {"program p; type V = record x: Int32; end; var u: V; begin writeln(u); end.",
+         "L0027@1:67"},
+        {"program p; type V = record x: Int32; end; function str(v: V): String; overload; begin return \"<\" & str(v.x) & \">\"; end; var u: V := {x: 3}; begin writeln(u, str(u), u:5); end.",
+         ""},
+        {"program p; type V = record x: Int32; end; function str(v: V): String; overload; begin return \"v\"; end; var u: V; begin writeln(u:5:2); end.",
+         "L0048@1:132"},
 };
 
 static void check_string(const char *src, char **errors)
@@ -2794,6 +2815,16 @@ static const unit_case unit_cases[] = {
      "",
      "errors",
      "L0098@ua.luxia:6:10"},
+    /* a str of a unit writes its values in a file that does not use it */
+    {{{"p.luxia",
+       "program P;\nuses Ub;\nbegin\n  writeln(Ub.Make(1), \" \", str(Ub.Make(2)));\nend.\n"},
+      {"ua.luxia",
+       "unit Ua;\ninterface\ntype\n  Vec = record x, y: Int32; end;\nfunction str(v: Vec): String; overload;\nimplementation\nfunction str(v: Vec): String; overload;\nbegin\n  return \"<\" & str(v.x) & \",\" & str(v.y) & \">\";\nend str;\nend Ua.\n"},
+      {"ub.luxia",
+       "unit Ub;\ninterface\nuses Ua;\nfunction Make(n: Int32): Vec;\nimplementation\nfunction Make(n: Int32): Vec;\nbegin\n  return {x: n; y: -n};\nend Make;\nend Ub.\n"}},
+     "<1,-1> <2,-2>\n",
+     "ok",
+     ""},
 };
 
 /* the reader of the files of a case */

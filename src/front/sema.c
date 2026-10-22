@@ -304,6 +304,7 @@ void limba_lxs_init(limba_lxs *S, limba_lx_ast *t, limba_lx *lx,
     S->val = limba_xcalloc(n, sizeof(*S->val));
     S->argmap = limba_xcalloc(n, sizeof(*S->argmap));
     S->pre = limba_xcalloc(n, sizeof(*S->pre));
+    S->str_of = limba_xcalloc(n, sizeof(*S->str_of));
     lxs_value_new(S, 0); /* value 0: none */
     universe(S);
 #if defined(__aarch64__) && !defined(_WIN32)
@@ -325,6 +326,7 @@ void limba_lxs_free(limba_lxs *S)
     free(S->val);
     free(S->argmap);
     free(S->pre);
+    free(S->str_of);
     free(S->ovl_next);
     free(S->ovl_pend);
     free(S->ops);
@@ -433,8 +435,15 @@ limba_sym lxs_declare(limba_lxs *S, uint32_t scope, uint32_t name_node,
     uint32_t n = ident_len(text);
     limba_sym dup = limba_sym_local(&S->st, S->universe, x->a);
     if (dup) {
-        lxs_error(S, LXE_DUPLICATE, name_node,
-                  "'%.*s' is a name of the language", (int)n, text);
+        if (S->st.sym[dup].kind == LIMBA_LSYM_BUILTIN &&
+            S->st.sym[dup].value == LXB_STR)
+            lxs_error(S, LXE_DUPLICATE, name_node,
+                      "'%.*s' is a name of the language: a str for a type "
+                      "of the program is added with overload",
+                      (int)n, text);
+        else
+            lxs_error(S, LXE_DUPLICATE, name_node,
+                      "'%.*s' is a name of the language", (int)n, text);
         return 0;
     }
     if (!lxs_unit_declare(S, scope, name_node))

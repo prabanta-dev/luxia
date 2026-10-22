@@ -2022,6 +2022,25 @@ end.
 prog.luxia:3:11: error[L0099]: 'Emit' has more meanings: give the C symbol with name "symbol"
 ```
 
+### L0100 — STR ADDED IN A FORM IT DOES NOT TAKE
+
+A `str` a program adds for one of its types is `function str(x: T): String; overload;`: one parameter without a mode or a default value, a type of the program, the `str` where that type is declared (§ 9.4).
+
+```pascal
+program p;
+type Vec = record x, y: Int32; end;
+function str(v: Vec): Int32; overload;
+begin
+  return v.x;
+end;
+begin
+end.
+```
+
+```
+prog.luxia:3:10: error[L0100]: a str gives a String
+```
+
 ### L0101 — OVERLOAD ALONE
 
 Warning: `overload` on a routine that joins no other of its name, in its file or in the units the file uses. A routine of an interface never gets it: it may join those of other units where it is used (§ 8.8).
