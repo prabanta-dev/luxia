@@ -1,0 +1,3 @@
+tests/run/syntax.luxia:8:14: error[L0010]: expected a value, found ')'
+ 8 |   writeln(1 +);
+   |              ^

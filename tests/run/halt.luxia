@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+//
+// halt(3): its code is the exit status, and nothing is reported.
+program Halt;
+begin
+  writeln("bye");
+  halt(3);
+end Halt.

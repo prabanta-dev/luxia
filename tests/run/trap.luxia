@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+//
+// an index out of its range, in a routine given before main: the message
+// and the position of the trap, after what was printed.
+program Trap;
+
+var
+  a: array[Int32 range 1..3] of Int32;
+
+function At(i: Int32): Int32;
+begin
+  return a[i];
+end At;
+
+begin
+  writeln("before");
+  writeln(At(4));
+end Trap.

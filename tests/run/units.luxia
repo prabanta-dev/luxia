@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+//
+// units found by the options (units.opts): Shapes with -I DIR, Tally,
+// used by the implementation of Shapes, with -IDIR, and Words, of the
+// standard library, with --stdlib=DIR. Their initialisations run before
+// the program, in the order of what they use.
+program Units;
+
+uses Shapes, Words;
+
+var s: Square;
+begin
+  s.side := 3;
+  writeln(Area(s), " ", Shapes.Perimeter(s));
+  writeln(Words.Times("ab", Shapes.made));
+end Units.

@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+//
+// the standard input, a line at a time, and no arguments.
+program Lines;
+begin
+  var line: String;
+  var n: Int64 := 0;
+  while readline(line) do
+    n := n + 1;
+    writeln(n, " ", length(line), " ", line);
+  end;
+  writeln(argcount());
+end Lines.

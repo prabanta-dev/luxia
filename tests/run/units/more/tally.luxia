@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+//
+// a unit of the program, in a directory given with -IDIR, used by the
+// implementation of another unit.
+unit Tally;
+
+interface
+
+function Count(n: Int64): Int64;
+
+implementation
+
+var total: Int64 := 0;
+
+function Count(n: Int64): Int64;
+begin
+  total := total + n;
+  return n;
+end Count;
+
+begin
+  writeln("tally");
+end Tally.

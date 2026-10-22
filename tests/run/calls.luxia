@@ -1,0 +1,44 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+//
+// Fib calls Later, given after it; a String in a record, released when
+// Name returns.
+program Calls;
+
+type
+  Item = record
+    name: String;
+    n: Int32;
+  end;
+
+var
+  total: Int64;
+
+function Fib(n: Int32): Int32;
+begin
+  if n < 2 then
+    return n;
+  end;
+  return Fib(n - 1) + Later(n - 2);
+end Fib;
+
+function Later(n: Int32): Int32;
+begin
+  return Fib(n);
+end Later;
+
+function Name(i: Int32): String;
+begin
+  var it: Item;
+  it.name := "item";
+  it.n := i;
+  return it.name;
+end Name;
+
+begin
+  total := 0;
+  for var i: Int32 := 1 to 10 do
+    total := total + Int64(Fib(i));
+  end;
+  writeln(total, " ", Name(7));
+end Calls.

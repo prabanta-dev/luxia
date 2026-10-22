@@ -1,0 +1,4 @@
+-I
+tests/run/units/lib
+-Itests/run/units/more
+--stdlib=tests/run/units/std

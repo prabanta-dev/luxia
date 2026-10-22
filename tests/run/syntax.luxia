@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+//
+// an error in the source: reported as limba reports it, nothing runs.
+program Syntax;
+begin
+  writeln("never");
+  writeln(1 +);
+end Syntax.

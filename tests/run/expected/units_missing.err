@@ -1,0 +1,3 @@
+tests/run/units_missing.luxia:8:6: error[L0064]: the unit 'Shapes' is not found: no shapes.luxia in the directory of the program
+ 8 | uses Shapes;
+   |      ^~~~~~

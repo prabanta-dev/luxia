@@ -1,0 +1,36 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+//
+// a unit of the program, in a directory given with -I DIR.
+unit Shapes;
+
+interface
+
+type
+  Square = record side: Int64; end;
+
+var
+  made: Int64 := 0;
+
+function Area(s: Square): Int64;
+function Perimeter(s: Square): Int64;
+
+implementation
+
+uses Tally;
+
+function Area(s: Square): Int64;
+begin
+  made := made + 1;
+  return Count(s.side * s.side);
+end Area;
+
+function Perimeter(s: Square): Int64;
+begin
+  made := made + 1;
+  return Count(4 * s.side);
+end Perimeter;
+
+begin
+  writeln("shapes");
+end Shapes.
