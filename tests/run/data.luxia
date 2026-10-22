@@ -35,6 +35,8 @@ type
   Words2 = array[Int32 range 1..50] of Word;
   Line = array[Int32 range 1..100] of Int32;
   Lines2 = array[Int32 range 1..4] of Line;
+  Long = array[Int32 range 1..200000] of Int64;
+  Longs = array[Int32 range 1..3] of Long;
 
 const
   Big: Entry = {k: 123456789012345678901234567890; name: "big"; tag: -3};
@@ -50,6 +52,7 @@ const
   Lines: Rows = {1: {else 1}, else {6: 6, else 2}};
   Said: Words2 = {1: {s: "one"; n: 1}, else {s: "w"; n: 3}};
   Planes: Lines2 = {else {1: 9, else 1}};
+  Wide: Longs = {else {1: 5, else 7}};
 
 var
   w, w2: Words := {"zero", "one", else "many"};
@@ -97,5 +100,7 @@ begin
   writeln(Said[1].s, " ", Said[2].s, Said[50].s, " ", Said[50].n);
   writeln(Planes[1][1], " ", Planes[1][2], " ", Planes[4][1], " ",
           Planes[4][100]);
+  writeln(Wide[1][1], " ", Wide[1][2], " ", Wide[3][1], " ",
+          Wide[3][200000]);
   Local();
 end.

@@ -14,8 +14,8 @@
  * nothing, as a global starts as zeros, and so is a hole of LXL_RUN
  * bytes or more between components. Main still stores a BigInt other
  * than 0 (the data hold only the BigInt 0), and fills in a loop a run
- * whose element is not bytes (it holds such a BigInt, or is larger than
- * LXL_IMAGE).
+ * whose element holds such a BigInt. An element larger than LXL_IMAGE is
+ * written element by element, its own runs fills: a fill holds bytes.
  */
 #include "lower.h"
 
@@ -27,6 +27,10 @@
 /* a run of one value counts as repeated from this many bytes: a loop in
    the IR is about ten instructions, some 100 bytes */
 #define LXL_RUN 256u
+/* an element of a run up to this size is written once, with its count;
+   a larger one, element by element, each with the fills of its own runs
+   (a fill holds bytes, not fills): data either way */
+#define LXL_IMAGE (1u << 20)
 
 /* one scalar component: its bits, or a String, or a value main stores */
 typedef struct {
@@ -165,7 +169,7 @@ static void put_span(data *D, uint64_t off, uint64_t count, uint32_t vn,
 {
     lxl *L = D->L;
     uint64_t esize = ti(L, et)->size;
-    if (count > 1 && esize && count * esize >= LXL_RUN) {
+    if (count > 1 && esize && count * esize >= LXL_RUN && esize <= LXL_IMAGE) {
         if (all_zero(L, vn, et))
             return;
         LIMBA_GROW(D->runs, D->nruns, D->capruns);
@@ -310,7 +314,6 @@ static void add_str(strs *z, uint64_t off, uint32_t str)
 /* the bytes of the value vn of type t (size bytes) into buf, its strings
    into z; false if a part of it is not bytes (a BigInt other than 0) or
    the value is larger than LXL_IMAGE */
-#define LXL_IMAGE (1u << 20)
 static bool image(lxl *L, uint32_t vn, limba_ltype t, uint8_t *buf,
                   uint64_t size, uint64_t at, strs *z)
 {
@@ -423,7 +426,7 @@ bool lxl_data(lxl *L, const limba_id *globals, uint32_t n, uint32_t init,
     for (uint32_t i = 0; i < D.nruns; i++) {
         const data_run *r = &D.runs[i];
         uint64_t es = ti(L, r->et)->size;
-        uint8_t *b = es <= LXL_IMAGE ? limba_xcalloc(es ? es : 1, 1) : NULL;
+        uint8_t *b = limba_xcalloc(es ? es : 1, 1);
         uint32_t first = z.n;
         bool ok = b && image(L, r->vn, r->et, b, es, r->off, &z);
         uint32_t last = z.n;
