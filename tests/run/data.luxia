@@ -1,0 +1,75 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+//
+// Typed constants and variables ready at once: their initial values are
+// the bytes of their globals, with the Strings as relocations; a BigInt
+// other than 0, and a table too large, keep the stores at the start of
+// main. Every form of aggregate, each value printed.
+program Data;
+
+type
+  Small = Int8 range -3..9;
+  Color = (Red, Green, Blue);
+  Entry = record
+    k: BigInt;
+    name: String;
+    tag: Small;
+  end;
+  Point = record
+    x: Float32;
+    y: Float64;
+    on: Boolean;
+    c: Char;
+    hue: Color;
+  end;
+  Row = array[Int32 range 1..6] of Int16;
+  Words = array[Int32 range 0..3] of String;
+  Grid = array[Int32 range 1..2, Int32 range 1..3] of Int64;
+  Points = array[Int32 range 1..2] of Point;
+  Large = array[Int64 range 1..140000] of Int64;
+
+const
+  Big: Entry = {k: 123456789012345678901234567890; name: "big"; tag: -3};
+  Zero: Entry = {k: 0; name: ""; tag: 9};
+  Pos: Row = {1, 2, else -7};
+  Named: Row = {6: 60, 2..3: 23, else 5};
+  Exact: Row = {3..6: 36, 1: 10, 2: 20};
+  Table: Large = {1: 11, else 4};
+
+var
+  w, w2: Words := {"zero", "one", else "many"};
+  g: Grid := {{1, 2, 3}, {4, 5, 6}};
+  ps: Points := {{x: 1.5; y: -0.1; on: true; c: 'q'; hue: Blue},
+                 {x: -2.25; y: 1e300; on: false; c: 'Z'; hue: Green}};
+  count: Int32 := -42;
+  ratio: Float32 := 0.1;
+  title: String := "data";
+  b: BigInt := 77;
+
+procedure Local();
+const
+  Inner: Row = {else 3};
+begin
+  writeln(Inner[1], " ", Inner[6]);
+end Local;
+
+begin
+  writeln(Big.k, " ", Big.name, " ", Big.tag);
+  writeln(Zero.k, " [", Zero.name, "] ", Zero.tag);
+  for var i: Int32 := 1 to 6 do
+    writeln(Pos[i], " ", Named[i], " ", Exact[i]);
+  end;
+  writeln(Table[1], " ", Table[140000]);
+  for var i: Int32 := 0 to 3 do
+    writeln(w[i], " ", w2[i]);
+  end;
+  w[1] := "changed";
+  writeln(w[1], " ", w2[1]);
+  writeln(g[1, 1], " ", g[1, 3], " ", g[2, 1], " ", g[2, 3]);
+  for var i: Int32 := 1 to 2 do
+    writeln(ps[i].x, " ", ps[i].y, " ", ps[i].on, " ", ps[i].c, " ",
+            ord(ps[i].hue));
+  end;
+  writeln(count, " ", ratio, " ", title, " ", b);
+  Local();
+end.

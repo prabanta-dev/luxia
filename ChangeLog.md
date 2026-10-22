@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Typed constants and variables ready at once are the initial bytes of
+  their globals (version 7 of Limba's IR, data and relocations), no
+  longer stores at the start of `main`; a String is a relocation to an
+  immortal string. A BigInt other than 0 and a global past 1 MiB keep
+  the stores. `lx_gen` gives half of the global records and arrays an
+  aggregate of literals and prints them first; its oracle computes the
+  mathematical functions with Limba's library, the bits of every engine.
 - Arrays of more indices, `array[I, J] of T`, as in Ada (specification
   § 3.7.2): `a[i, j]`, laid out by rows as in C; `low(a, k)`,
   `high(a, k)`, `length(a, k)`; aggregates nested by index; open

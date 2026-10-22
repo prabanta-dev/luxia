@@ -211,6 +211,11 @@ limba_id lxl_addr(lxl *L, uint32_t node);
 void lxl_agg_fill(lxl *L, uint32_t node, limba_id dst, limba_ltype t);
 void lxl_agg_fill_dyn(lxl *L, uint32_t node, limba_id p, limba_ltype t,
                       limba_id lo, limba_id hi);
+/* the initial value init of type t, known before any code runs, as the
+   data of the n globals (lower_data.c): false, and nothing done, when it
+   cannot be (a BigInt other than 0, a component not constant, too large) */
+bool lxl_data(lxl *L, const limba_id *globals, uint32_t n, uint32_t init,
+              limba_ltype t);
 void lxl_branch(lxl *L, uint32_t node, limba_id t, limba_id f);
 /* v, of type from, as a value of type to: range checks and widths */
 limba_id lxl_coerce(lxl *L, limba_id v, limba_ltype from, limba_ltype to);

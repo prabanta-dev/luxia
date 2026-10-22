@@ -1368,6 +1368,29 @@ static bool ready_decl(lxl *L, uint32_t d)
            k != LIMBA_LTK_BIGINT;
 }
 
+/* a var declaration ready at once whose value is the data of its
+   globals (§ 11h of progetto_ir.md): no store in main */
+static bool ready_data(lxl *L, uint32_t d)
+{
+    const limba_lx_node *x = nd(L, d);
+    uint32_t n = list_n(L, x->a);
+    limba_ltype t = 0;
+    limba_id *g = limba_xcalloc(n ? n : 1, sizeof(*g));
+    bool ok = n > 0;
+    for (uint32_t k = 0; k < n && ok; k++) {
+        limba_sym s = L->S->sym[list_at(L, x->a, k)];
+        ok = s && L->S->st.sym[s].type && L->store[s].kind == LXL_GLOBAL &&
+             (!t || t == L->S->st.sym[s].type);
+        if (ok) {
+            t = L->S->st.sym[s].type;
+            g[k] = L->store[s].global;
+        }
+    }
+    ok = ok && lxl_data(L, g, n, x->c, t);
+    free(g);
+    return ok;
+}
+
 /* the name in the IR of a symbol, interned */
 static limba_id ir_name(lxl *L, limba_sym s, const char *suffix)
 {
@@ -1572,7 +1595,8 @@ limba_module *limba_lxl_program_each(limba_lxs *S,
         }
     }
     /* the typed constants of records and arrays, those of routines too:
-       globals, filled first in main (§ 4.3) */
+       globals, their values as data (lower_data.c), or filled first in
+       main (§ 4.3) */
     for (uint32_t i = 0; i < S->ntconsts; i++) {
         limba_sym s = S->sym[nd(L, S->tconsts[i])->a];
         limba_ltype t = s ? S->st.sym[s].type : 0;
@@ -1604,8 +1628,9 @@ limba_module *limba_lxl_program_each(limba_lxs *S,
             bodies(L, files[k], file_decls(L, files[k], part == 1), off, true);
     if (L->stopped)
         goto done;
-    /* main: the records and arrays without a value (§ 4.5) and the
-       variables ready at once, of every file; then each initialisation:
+    /* main: the typed constants that are not data, the records and arrays
+       without a value (§ 4.5) and the variables ready at once that are
+       not data, of every file; then each initialisation:
        the initial values computed, the begin ... end of a unit; the
        program's body last */
     L->result = 0;
@@ -1613,7 +1638,8 @@ limba_module *limba_lxl_program_each(limba_lxs *S,
     for (uint32_t i = 0; i < S->ntconsts; i++) {
         const limba_lx_node *x = nd(L, S->tconsts[i]);
         limba_sym s = S->sym[x->a];
-        if (s && S->st.sym[s].type && L->store[s].kind == LXL_GLOBAL)
+        if (s && S->st.sym[s].type && L->store[s].kind == LXL_GLOBAL &&
+            !lxl_data(L, &L->store[s].global, 1, x->c, S->st.sym[s].type))
             lxl_agg_fill(L, x->c, lxl_var_addr(L, s), S->st.sym[s].type);
     }
     for (uint32_t k = 0; k < nu; k++) {
@@ -1627,7 +1653,7 @@ limba_module *limba_lxl_program_each(limba_lxs *S,
                 if (x->kind != LXN_VAR)
                     continue;
                 if (x->c) {
-                    if (ready_decl(L, d))
+                    if (ready_decl(L, d) && !ready_data(L, d))
                         var_decl(L, d);
                     continue;
                 }

@@ -30,6 +30,7 @@
 #include "gen.h"
 
 #include "limba/fmt.h"
+#include "limba/math.h"
 #include "common/xalloc.h"
 #include "common/bigint.h"
 
@@ -1261,6 +1262,80 @@ static uint32_t self_part(G *g, uint32_t self, uint32_t t)
 static uint32_t agg_literal(G *g, uint32_t t, int d)
 {
     return agg_self(g, t, d, UINT32_MAX);
+}
+
+/* a constant for a cell of a global's initial value: a literal, nil */
+static uint32_t const_cell(G *g, uint32_t t)
+{
+    return is_ptr(g, t) ? nil_of(g, t) : lit(g, t, init_value(g, t));
+}
+
+/* the initial value of a global of record or fixed array type t: an
+   aggregate of literals, in the forms of agg_self (positional, some then
+   else, by index with ranges, by index then else), which the front end
+   writes as the bytes of the global (progetto_ir.md § 11h); 0 for an
+   array of more than 16 elements */
+static uint32_t agg_const(G *g, uint32_t t)
+{
+    uint32_t vals[16], los[16], his[16], n = 0, other = 0;
+    bool named = false;
+    if (is_record(g, t)) {
+        for (uint32_t f = 0; f < g->ty[t].elem && n < 16; f++)
+            vals[n++] = const_cell(g, field_type(g, t, f));
+    } else {
+        uint32_t len = ncells(g, t), et = g->ty[t].elem, it = g->ty[t].index;
+        v128 lo = g->ty[t].lo;
+        if (len > 16)
+            return 0;
+        unsigned form = below(g, 4);
+        if (form <= 1) {
+            uint32_t m = form == 0 || len < 2 ? len : 1 + below(g, len - 1);
+            for (uint32_t k = 0; k < m; k++)
+                vals[n++] = const_cell(g, et);
+            if (m < len)
+                other = const_cell(g, et);
+        } else {
+            uint32_t order[16];
+            for (uint32_t k = 0; k < len; k++)
+                order[k] = k;
+            for (uint32_t k = len; k > 1; k--) {
+                uint32_t j = below(g, k), x = order[k - 1];
+                order[k - 1] = order[j];
+                order[j] = x;
+            }
+            uint8_t taken[16] = {0};
+            uint32_t skip = form == 3 && len > 1 ? 1 + below(g, len - 1) : 0;
+            for (uint32_t k = 0; k < skip; k++)
+                taken[order[k]] = 1;
+            for (uint32_t k = 0; k < len; k++) {
+                uint32_t a = order[k];
+                if (taken[a])
+                    continue;
+                uint32_t b = a;
+                while (chance(g, 40) && b + 1 < len && !taken[b + 1])
+                    b++;
+                for (uint32_t j = a; j <= b; j++)
+                    taken[j] = 1;
+                los[n] = lit(g, it, lo + a);
+                his[n] = b > a ? lit(g, it, lo + b) : 0;
+                vals[n++] = const_cell(g, et);
+            }
+            named = true;
+            if (skip)
+                other = const_cell(g, et);
+        }
+    }
+    uint32_t i = new_e(g, E_AGG, t);
+    g->e[i].args = keep_list(g, vals, n);
+    g->e[i].nargs = n;
+    g->e[i].op = named;
+    if (named) {
+        g->e[i].a = keep_list(g, los, n);
+        g->e[i].b = keep_list(g, his, n);
+    }
+    g->e[i].c = other;
+    g->e[i].var = new_v(g, t, V_LOCAL);
+    return i;
 }
 
 static uint32_t agg_part_of(G *g, uint32_t t, int d, uint32_t self)
@@ -5200,7 +5275,7 @@ static void program(G *g, text *o, uint32_t nglob)
             put_name(o, g, v);
             put(o, ": ");
             put_type(o, g, g->v[v].t);
-            if (is_scalar(g, g->v[v].t) || is_ptr(g, g->v[v].t)) {
+            if (g->st[v].e) {
                 put(o, " := ");
                 pexpr(g, o, g->st[v].e);
             }
@@ -6196,7 +6271,9 @@ static v128 ev(X *x, uint32_t i)
         return (v128)x->ref[e->var];
     }
     case E_MATH: {
-        /* in double, rounded to the type: what Float32 does too */
+        /* in double, rounded to the type: what Float32 does too; the
+           functions of Limba's library, the bits every engine gives
+           (progetto_ir.md § 11b), the exact ones from the C library */
         double a = fval(ev(x, e->a)), r;
         if (x->trap)
             return 0;
@@ -6205,22 +6282,22 @@ static v128 ev(X *x, uint32_t i)
             r = sqrt(a);
             break;
         case M_SIN:
-            r = sin(a);
+            r = limba_math_sin(a);
             break;
         case M_COS:
-            r = cos(a);
+            r = limba_math_cos(a);
             break;
         case M_TAN:
-            r = tan(a);
+            r = limba_math_tan(a);
             break;
         case M_ARCTAN:
-            r = atan(a);
+            r = limba_math_atan(a);
             break;
         case M_EXP:
-            r = exp(a);
+            r = limba_math_exp(a);
             break;
         case M_LN:
-            r = log(a);
+            r = limba_math_ln(a);
             break;
         case M_TRUNC:
             r = trunc(a);
@@ -7109,6 +7186,14 @@ static bool attempt(uint64_t seed, limba_lxgen *p, bool units)
         show(&g, v);
     }
     nglob += narrays;
+    /* half of the records and arrays begin with an aggregate of literals,
+       their bytes and not code; after the globals, which take the first
+       numbers */
+    for (uint32_t v = 0; v < nglob; v++) {
+        uint32_t t = g.v[v].t;
+        if ((is_record(&g, t) || is_array(&g, t)) && chance(&g, 50))
+            g.st[v].e = agg_const(&g, t);
+    }
     /* the global constants, after the variables: those take the first
        numbers */
     for (uint32_t k = 0, n = below(&g, 5); k < n; k++) {
@@ -7134,6 +7219,42 @@ static bool attempt(uint64_t seed, limba_lxgen *p, bool units)
         while (g.v[d].t != rt) /* a global of every such type exists */
             d++;
         nfirst += copy_call(&g, r, d, true, first + nfirst);
+    }
+    /* and prints the globals that began with an aggregate, before any
+       trap: the values the front end wrote as data */
+    for (uint32_t v = 0; v < nglob && nfirst < 13; v++) {
+        uint32_t t = g.v[v].t;
+        if (!g.st[v].e || !(is_record(&g, t) || is_array(&g, t)))
+            continue;
+        uint32_t items[24], k = 0, n = ncells(&g, t);
+        for (uint32_t c = 0; c < n && c < 12; c++) {
+            uint32_t ct =
+                is_record(&g, t) ? field_type(&g, t, c) : g.ty[t].elem;
+            if (k)
+                items[k++] = new_e(&g, E_STR, 0);
+            uint32_t el;
+            if (is_record(&g, t)) {
+                el = field_ref(&g, v, c);
+            } else {
+                /* the literal first: new_e may move g.e */
+                uint32_t ix = lit(&g, g.ty[t].index, g.ty[t].lo + c);
+                el = new_e(&g, E_INDEX, ct);
+                g.e[el].var = v;
+                g.e[el].a = ix;
+            }
+            if (is_ptr(&g, ct)) {
+                el = binop(&g, O_EQ, T_BOOL, el, nil_of(&g, ct));
+            } else if (is_enum(&g, ct)) {
+                uint32_t o = new_e(&g, E_ORD, T_U32);
+                g.e[o].a = el;
+                el = o;
+            }
+            items[k++] = el;
+        }
+        uint32_t w = new_s(&g, S_WRITE);
+        g.st[w].args = keep_list(&g, items, k);
+        g.st[w].nargs = k;
+        first[nfirst++] = w;
     }
     /* and prints the functions of the library on some real globals */
     for (uint32_t v = 0; v < nglob && nfirst < 14; v++) {
@@ -7204,6 +7325,8 @@ static bool attempt(uint64_t seed, limba_lxgen *p, bool units)
             uint32_t t = g.v[v].t;
             if (!is_record(&g, t) && !(is_ptr(&g, t) && chance(&g, 50)))
                 continue;
+            if (is_record(&g, t) && g.st[v].e)
+                continue; /* it has its initial value */
             if (is_ptr(&g, t)) {
                 uint32_t s = new_s(&g, S_NEW);
                 g.st[s].var = v;
@@ -7233,7 +7356,7 @@ static bool attempt(uint64_t seed, limba_lxgen *p, bool units)
        scalar global */
     for (uint32_t v = 0; v < nglob; v++) {
         uint32_t at = g.v[v].t;
-        if (!is_array(&g, at))
+        if (!is_array(&g, at) || g.st[v].e)
             continue;
         for (v128 k = g.ty[at].hi; k >= g.ty[at].lo; k--) {
             if (chance(&g, 8))
@@ -7327,9 +7450,17 @@ static bool attempt(uint64_t seed, limba_lxgen *p, bool units)
         put(&x.out, "lib\n"); /* the initialisation of Lib, first */
     if (g.web)
         putn(&x.out, web.out.b, web.out.n); /* the program's first line */
-    for (uint32_t v = 0; v < nglob; v++)
-        if (!is_array(&g, g.v[v].t) && !is_record(&g, g.v[v].t))
+    for (uint32_t v = 0; v < nglob; v++) {
+        uint32_t t = g.v[v].t;
+        if (!is_array(&g, t) && !is_record(&g, t)) {
             x.cell[x.ref[v]] = g.e[g.st[v].e].lit;
+        } else if (g.st[v].e) {
+            /* an aggregate of literals: no trap */
+            v128 r = ev(&x, g.st[v].e);
+            memmove(&x.cell[x.ref[v]], &x.cell[(uint32_t)r],
+                    ncells(&g, t) * sizeof(v128));
+        }
+    }
     text in = {NULL, 0, 0, 1, 1, 0};
     for (uint32_t k = 0; k < g.nline; k++) {
         putn(&in, g.str[g.line[k]].b, g.str[g.line[k]].n);
