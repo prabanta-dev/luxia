@@ -437,6 +437,7 @@ typedef struct {
     struct xmat {
         int64_t lo1, hi1, lo2, hi2, a, b, c, k, i1, j1, w;
         bool scale;
+        uint8_t mode; /* 0 static bounds, 1 computed, 2 made by new */
         uint32_t line, col;
     } *mat;
     uint32_t nmat, capmat;
@@ -3223,7 +3224,8 @@ static uint32_t matrix(G *g, uint32_t *out)
     m->a = (int64_t)below(g, 101) - 50;
     m->b = (int64_t)below(g, 101) - 50;
     m->c = (int64_t)below(g, 101) - 50;
-    m->scale = chance(g, 50);
+    m->mode = (uint8_t)below(g, 3);
+    m->scale = m->mode != 2 && chance(g, 50);
     m->k = 1 + (int64_t)below(g, 3);
     m->w = 1 + (int64_t)below(g, 3);
     /* the element written: inside, or now and then just outside */
@@ -4675,15 +4677,36 @@ static void pstmt(G *g, text *o, uint32_t si, int ind)
     case S_MAT: {
         struct xmat *m = &g->mat[s.fld];
         uint32_t n = s.fld;
-        putf(o,
-             "var mx%u: array[Int64 range %lld..%lld, Int64 range "
-             "%lld..%lld] of Int64;\n",
-             n, (long long)m->lo1, (long long)m->hi1, (long long)m->lo2,
-             (long long)m->hi2);
+        /* the whole array: mxN, or mxN^ when made by new */
+        char w[24];
+        snprintf(w, sizeof(w), m->mode == 2 ? "mx%u^" : "mx%u", n);
+        if (m->mode == 0) {
+            putf(o,
+                 "var mx%u: array[Int64 range %lld..%lld, Int64 range "
+                 "%lld..%lld] of Int64;\n",
+                 n, (long long)m->lo1, (long long)m->hi1, (long long)m->lo2,
+                 (long long)m->hi2);
+        } else {
+            /* the bounds in variables: computed, or given to new */
+            putf(o, "var ml%u: Int64 := %lld;\n", n, (long long)m->lo1);
+            indent(o, ind);
+            putf(o, "var mh%u: Int64 := %lld;\n", n, (long long)m->hi1);
+            indent(o, ind);
+            if (m->mode == 1)
+                putf(o,
+                     "var mx%u: array[Int64 range ml%u..mh%u, Int64 range "
+                     "%lld..%lld] of Int64;\n",
+                     n, n, n, (long long)m->lo2, (long long)m->hi2);
+            else
+                putf(o,
+                     "var mx%u: ^mxt := new(mxt range ml%u..mh%u, "
+                     "%lld..%lld);\n",
+                     n, n, n, (long long)m->lo2, (long long)m->hi2);
+        }
         indent(o, ind);
-        putf(o, "for var mi%u := low(mx%u, 1) to high(mx%u, 1) do\n", n, n, n);
+        putf(o, "for var mi%u := low(%s, 1) to high(%s, 1) do\n", n, w, w);
         indent(o, ind + 1);
-        putf(o, "for var mj%u := low(mx%u, 2) to high(mx%u, 2) do\n", n, n, n);
+        putf(o, "for var mj%u := low(%s, 2) to high(%s, 2) do\n", n, w, w);
         indent(o, ind + 2);
         putf(o, "mx%u[mi%u, mj%u] := mi%u * (%lld) + mj%u * (%lld) + (%lld);\n",
              n, n, n, n, (long long)m->a, n, (long long)m->b, (long long)m->c);
@@ -4695,6 +4718,21 @@ static void pstmt(G *g, text *o, uint32_t si, int ind)
             indent(o, ind);
             putf(o, "mscale(mx%u, %lld);\n", n, (long long)m->k);
         }
+        if (m->mode == 2) {
+            /* the total by hand: an array of new is no argument */
+            indent(o, ind);
+            putf(o, "var ms%u: Int64 := 0;\n", n);
+            indent(o, ind);
+            putf(o, "for var mi%u := low(%s) to high(%s) do\n", n, w, w);
+            indent(o, ind + 1);
+            putf(o, "for var mj%u := low(%s, 2) to high(%s, 2) do\n", n, w, w);
+            indent(o, ind + 2);
+            putf(o, "ms%u := ms%u + mx%u[mi%u, mj%u];\n", n, n, n, n, n);
+            indent(o, ind + 1);
+            put(o, "end;\n");
+            indent(o, ind);
+            put(o, "end;\n");
+        }
         /* the indices in variables: a constant outside is no program */
         indent(o, ind);
         putf(o, "var mo%u: Int64 := %lld;\n", n, (long long)m->i1);
@@ -4705,10 +4743,20 @@ static void pstmt(G *g, text *o, uint32_t si, int ind)
         m = &g->mat[s.fld];
         m->line = o->line + o->lbase;
         m->col = o->col;
-        putf(o,
-             "[mo%u, mp%u], \" \", length(mx%u, 2), \" \", low(mx%u, 2), \" "
-             "\", mtotal(mx%u), \" \", mtotal(mx%u, w => %lld));\n",
-             n, n, n, n, n, n, (long long)m->w);
+        putf(o, "[mo%u, mp%u], \" \", length(%s, 2), \" \", low(%s, 2), ", n, n,
+             w, w);
+        if (m->mode == 2)
+            putf(o, "\" \", ms%u, \" \", ms%u * %lld, \" \", %s = %s);\n", n, n,
+                 (long long)m->w, w, w);
+        else
+            putf(o,
+                 "\" \", mtotal(mx%u), \" \", mtotal(mx%u, w => %lld), \" \", "
+                 "msame(mx%u, mx%u));\n",
+                 n, n, (long long)m->w, n, n);
+        if (m->mode == 2) {
+            indent(o, ind);
+            putf(o, "dispose(mx%u);\n", n);
+        }
         break;
     }
     case S_RDZ:
@@ -5174,7 +5222,10 @@ static void program(G *g, text *o, uint32_t nglob)
                "<>] of Int64; k: Int64);\nbegin\n  for var i := low(m) to "
                "high(m) do\n    for var j := low(m, 2) to high(m, 2) do\n "
                "     m[i, j] := m[i, j] * k;\n    end;\n  end;\nend "
-               "mscale;\n");
+               "mscale;\n\nfunction msame(a, b: array[Int64 range <>, Int64 "
+               "range <>] of Int64): Boolean;\nbegin\n  return a = b;\nend "
+               "msame;\n\ntype mxt = array[Int64 range <>, Int64 range <>] of "
+               "Int64;\n");
     put(o, "\nbegin\n");
     if (g->web)
         web_program_print(o, g->web);
@@ -6836,7 +6887,7 @@ static int run_stmt(X *x, uint32_t si)
         print_value(g, &x->out, T_I64, total);
         put(&x->out, " ");
         print_value(g, &x->out, T_I64, total * m->w);
-        put(&x->out, "\n");
+        put(&x->out, " true\n");
         return X_NEXT;
     }
     case S_RDZ: {

@@ -75,7 +75,10 @@ LX_NODE(CALL, "call", "nl--")        /* callee, arguments */
 LX_NODE(FMT, "fmt", "nnn-")          /* value:width:decimals */
 LX_NODE(NAMED, "named", "in--")      /* name => value: an argument by
                                         name (0: not a plain name) */
-LX_NODE(NEW, "new", "n---")          /* the type */
+LX_NODE(NEW, "new", "nq--")          /* the type; for an open array of
+                                        more indices, the bounds of the
+                                        indices after the first (a list of
+                                        RANGE nodes) */
 LX_NODE(AGG, "aggregate", "l---")    /* COMP nodes (§ 6.8); flags: the
                                         separators seen */
 LX_NODE(COMP, "comp", "nnn-")        /* index or field (0: positional),

@@ -345,7 +345,22 @@ static uint32_t primary(void *ctx)
         limba_loc loc = t->loc;
         limba_lxp_next(P);
         limba_lxp_expect(P, LX_LPAREN, "after 'new': new(T)");
-        n = lxp_node(P, LXN_NEW, loc, limba_lxp_type(P), 0, 0, 0);
+        uint32_t ty = limba_lxp_type(P), more = 0;
+        if (lxp_kind(P) == LX_COMMA) {
+            /* new(M range a..b, c..d): the bounds of the next indices */
+            limba_loc ml = lxp_loc(P);
+            uint32_t mark = limba_lx_list_begin(P->t);
+            while (limba_lxp_accept(P, LX_COMMA)) {
+                limba_loc rl = lxp_loc(P);
+                uint32_t lo = limba_lxp_expr(P, LXP_SIMPLE);
+                limba_lxp_expect(P, LX_DOTDOT, "between the bounds: a..b");
+                uint32_t hi = limba_lxp_expr(P, LXP_SIMPLE);
+                limba_lx_list_push(P->t,
+                                   lxp_node(P, LXN_RANGE, rl, lo, hi, 0, 0));
+            }
+            more = limba_lx_list_end(P->t, mark, ml);
+        }
+        n = lxp_node(P, LXN_NEW, loc, ty, more, 0, 0);
         limba_lxp_expect(P, LX_RPAREN, "after the type");
         return n;
     }

@@ -413,7 +413,7 @@ static void free_dyns(lxl *L, uint32_t n)
         const lxl_store *st = &L->store[L->dyns[i]];
         limba_id a = st->addr;
         lxl_rc(L, LIMBA_OP_RELEASE, a,
-               ti(L, L->S->st.sym[L->dyns[i]].type)->elem, st->count);
+               lxl_cell_type(L, L->S->st.sym[L->dyns[i]].type), st->count);
         lxl_rt(L, LIMBA_RT_MEM_FREE, LIMBA_T_VOID, &a, 1);
     }
 }
@@ -469,36 +469,89 @@ static void dynamic(lxl *L, limba_sym s, uint32_t tnode)
     limba_ltype t = L->S->st.sym[s].type;
     const limba_typeinfo *x = ti(L, t);
     lxl_store *st = &L->store[s];
-    const limba_lx_node *in = nd(L, nd(L, tnode)->a);
     limba_ltype it = x->index;
+    uint32_t dims = lxl_dims(L, t);
+    limba_ltype cell = lxl_cell_type(L, t);
     st->kind = LXL_DYN;
-    st->lo = lxl_value(L, in->b);
-    st->hi = lxl_value(L, in->c);
-    limba_id lo = lxl_to_i64(L, st->lo, it), hi = lxl_to_i64(L, st->hi, it);
-    /* an empty range holds no element (§ 4.5), a length past an Int64 is
-       out of memory (§ 3.7) */
-    uint32_t c[2] = {hi, lo};
-    limba_id empty = lxl_emit(L, LIMBA_OP_ICMP, LIMBA_T_I1,
-                              lxl_signed(L, lxs_base(L->S, it)) ? LIMBA_CC_SLT
-                                                                : LIMBA_CC_ULT,
-                              0, 0, c, 2);
-    limba_id n = lxl_count(L, empty, lo, hi);
+    limba_id n = LIMBA_NONE;
+    if (dims > 1) {
+        free(st->dims);
+        st->dims = limba_xmalloc(2 * (dims - 1) * sizeof(limba_id));
+    }
+    /* the bounds of each index, from the left: written, or those of its
+       type; the cells the product of the lengths */
+    const limba_lx_node *lev = nd(L, tnode);
+    limba_ltype lt = t;
+    for (uint32_t d = 0; d < dims; d++) {
+        const limba_lx_node *tn = nd(L, lev->a);
+        limba_ltype ix = ti(L, lt)->index;
+        limba_id l, h;
+        if (tn->kind == LXN_TNAME && tn->b) {
+            l = lxl_value(L, tn->b);
+            h = lxl_value(L, tn->c);
+        } else {
+            l = lxl_iconst(L, lxl_type(L, ix), (int64_t)ti(L, ix)->lo);
+            h = lxl_iconst(L, lxl_type(L, ix), (int64_t)ti(L, ix)->hi);
+        }
+        if (d == 0) {
+            st->lo = l;
+            st->hi = h;
+        }
+        limba_id lo = lxl_to_i64(L, l, ix), hi = lxl_to_i64(L, h, ix);
+        if (d > 0) {
+            st->dims[2 * (d - 1)] = lo;
+            st->dims[2 * (d - 1) + 1] = hi;
+        }
+        /* an empty range holds no element (§ 4.5), a length past an Int64
+           is out of memory (§ 3.7) */
+        uint32_t c[2] = {hi, lo};
+        limba_id empty = lxl_emit(
+            L, LIMBA_OP_ICMP, LIMBA_T_I1,
+            lxl_signed(L, lxs_base(L->S, ix)) ? LIMBA_CC_SLT : LIMBA_CC_ULT, 0,
+            0, c, 2);
+        limba_id k = lxl_count(L, empty, lo, hi);
+        if (d == 0) {
+            n = k;
+        } else {
+            /* n * k past INT64_MAX: out of memory */
+            limba_id one = lxl_iconst(L, LIMBA_T_I64, 1);
+            uint32_t z[2] = {k, lxl_iconst(L, LIMBA_T_I64, 0)};
+            uint32_t sel[3] = {
+                lxl_emit(L, LIMBA_OP_ICMP, LIMBA_T_I1, LIMBA_CC_EQ, 0, 0, z, 2),
+                one, k};
+            limba_id kk =
+                lxl_emit(L, LIMBA_OP_SELECT, LIMBA_T_I64, 0, 0, 0, sel, 3);
+            uint32_t dv[2] = {lxl_iconst(L, LIMBA_T_I64, INT64_MAX), kk};
+            uint32_t r[2] = {
+                n, lxl_emit(L, LIMBA_OP_UDIV, LIMBA_T_I64, 0, 0, 0, dv, 2)};
+            limba_id room = lxl_emit(L, LIMBA_OP_ICMP, LIMBA_T_I1, LIMBA_CC_ULE,
+                                     0, 0, r, 2);
+            lxl_emit(L, LIMBA_OP_CHECK, LIMBA_T_VOID, 0, LIMBA_TRAP_NOMEM, 0,
+                     &room, 1);
+            uint32_t m[2] = {n, k};
+            n = lxl_emit(L, LIMBA_OP_MUL, LIMBA_T_I64, 0, 0, 0, m, 2);
+        }
+        lt = ti(L, lt)->elem;
+        if (d + 1 < dims)
+            lev = nd(L, lev->b);
+    }
     st->count = n;
     /* n * size never past INT64_MAX: out of memory, as new (no check) */
-    uint64_t esize = ti(L, x->elem)->size ? ti(L, x->elem)->size : 1;
+    uint64_t esize = ti(L, cell)->size ? ti(L, cell)->size : 1;
     uint32_t r[2] = {n,
                      lxl_iconst(L, LIMBA_T_I64, (int64_t)(INT64_MAX / esize))};
     limba_id room =
         lxl_emit(L, LIMBA_OP_ICMP, LIMBA_T_I1, LIMBA_CC_ULE, 0, 0, r, 2);
     lxl_emit(L, LIMBA_OP_CHECK, LIMBA_T_VOID, 0, LIMBA_TRAP_NOMEM, 0, &room, 1);
-    uint32_t o4[2] = {
-        n, lxl_iconst(L, LIMBA_T_I64, (int64_t)ti(L, x->elem)->size)};
+    uint32_t o4[2] = {n,
+                      lxl_iconst(L, LIMBA_T_I64, (int64_t)ti(L, cell)->size)};
     limba_id bytes = lxl_emit(L, LIMBA_OP_MUL, LIMBA_T_I64, 0, 0, 0, o4, 2);
     st->addr = lxl_rt(L, LIMBA_RT_MEM_ALLOC, LIMBA_T_PTR, &bytes, 1);
     uint32_t o5[3] = {st->addr, lxl_iconst(L, LIMBA_T_I8, 0), bytes};
     lxl_emit(L, LIMBA_OP_MEMSET, LIMBA_T_VOID, 0, 0, 0, o5, 3);
-    if (lxl_has_narrow(L, x->elem))
-        lxl_fill_dyn(L, st->addr, bytes, x->elem);
+    if (lxl_has_narrow(L, cell))
+        lxl_fill_dyn(L, st->addr, bytes, cell);
+    (void)it;
     LIMBA_GROW(L->dyns, L->ndyns, L->capdyns);
     L->dyns[L->ndyns++] = s;
 }
@@ -1331,6 +1384,14 @@ void lxl_begin_function(lxl *L, limba_id fid)
 void lxl_end_function(lxl *L, uint32_t node, bool function)
 {
     end_function(L, node, function);
+}
+
+limba_ltype lxl_cell_type(const lxl *L, limba_ltype t)
+{
+    const limba_typeinfo *x = &L->S->ts.t[t];
+    while (x->flags & LIMBA_TF_MULTI)
+        x = &L->S->ts.t[x->elem];
+    return x->elem;
 }
 
 uint32_t lxl_dims(const lxl *L, limba_ltype t)

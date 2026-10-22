@@ -347,12 +347,27 @@ type
 - A whole value is written with **aggregates nested by index** (§ 6.8):
   `{{1.0, 0.0}, {0.0, 1.0}}`, `{1: {1: 1.0, else 0.0}, else {else 0.0}}`.
 - An array of more indices is assigned and compared (§ 6.2) as a whole,
-  as any array of its type.
+  as any array of its type. Two arrays of more indices one of which has
+  open or computed bounds (an open parameter, a computed array, `p^`)
+  are equal when their indices have the same lengths, one by one, and
+  their cells are equal in order; different lengths are a difference
+  found before any cell.
+- **Computed bounds** (§ 3.7): `var m: array[Int64 range 1..n, Int64
+  range 1..k] of Float64`, in the same places as for one index; an index
+  may be computed and another not. The bounds are computed from the
+  left; a number of cells past an `Int64`, or past the memory, is "out of
+  memory" (§ 10.1).
+- **Made by new** (§ 9.7): `new(Matrix range 1..n, 1..k)`; `p[i, j]`,
+  `low(p^, k)`, `high(p^, k)`, `length(p^, k)`, `p^ = q^` and
+  `dispose(p)` as for one index.
 - **Open**: `array[I1 range <>, I2 range <>] of T` has **all its indices
-  open, or none**. It is the type of a parameter, as in § 3.7.1, and
-  takes the bounds of every index from the argument: an array of as many
-  indices, of the same base index by index, with elements of the same
-  type. A subtype index checks the bounds of its index as in § 3.7.1.
+  open, or none**. It is the type of a parameter, as in § 3.7.1, or
+  the type a pointer points to, and takes the bounds of every index from
+  the argument: an array of as many indices, of the same base index by
+  index, with elements of the same type. A subtype index checks the
+  bounds of its index as in § 3.7.1. An aggregate given to it has, at
+  each level, the bounds of § 6.8, and its aggregates of the next indices
+  all have the same bounds (a compile-time error otherwise).
 - The routines of the predefined library on arrays (§ 9.5) take arrays
   of one index.
 
@@ -1465,6 +1480,11 @@ engine.
   in bytes in the address space (§ 3.7): never a silent overflow. The elements follow § 3.11.
   `new(A)` without a range, for an open array type, is a compile-time
   error.
+- `new(M range lo1..hi1, lo2..hi2, ...)`, with `M` an open array of more
+  indices (§ 3.7.2), creates an array with the bounds of each index, in
+  order, as above: all the bounds are computed from the left before the
+  memory is taken, each checked against its own index; one pair for each
+  index (a compile-time error otherwise). Its cells follow § 3.11.
 - `dispose(p)` frees the object `p` points to (a whole array created by
   `new(A range lo..hi)`); `dispose(nil)` does nothing. Disposing of an
   object already disposed is a run-time error, "invalid dispose", which
@@ -1989,7 +2009,8 @@ Simple     = [ "+" | "-" ] Term { ( "+" | "-" | "&" ) Term } .
 Term       = Factor { ( "*" | "/" | "div" | "mod" | "rem" | "shl" | "shr" ) Factor } .
 Factor     = Primary [ "**" Primary ] | "not" Primary | "abs" Primary .
 Primary    = integer | real | char | string | "true" | "false" | "nil"
-           | Designator | "(" Expr ")" | "new" "(" Type ")" | Aggregate .
+           | Designator | "(" Expr ")" | "new" "(" Type { "," Range } ")"
+           | Aggregate .
 Aggregate  = "{" [ Component { ( "," | ";" ) Component } ] "}" .
 Component  = "else" Expr | Simple [ [ ".." Simple ] ":" Expr ] .
 Designator = ident { "." ident | "[" Expr { "," Expr } "]" | "^" | "(" [ Arg { "," Arg } ] ")" } .
@@ -2033,8 +2054,8 @@ and tools can anticipate them.
   run-time checks as Ada's `Constraint_Error` does.
 - An order (`<`) on arrays of discrete elements, as in Ada.
 - Sets; the brackets of Pascal (`[a, b]`) remain free for them.
-- Arrays of more indices with computed bounds, or made by `new`; open
-  arrays of more indices compared as a whole, or given an aggregate.
+- An aggregate as the initial value of an array of more indices with
+  computed bounds.
 - Assignment of whole open arrays, with a length check.
 - Iteration over the Unicode characters of a string.
 - Redefinition of the names of the predefined library.

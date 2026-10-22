@@ -1078,7 +1078,9 @@ static limba_ltype type_node(limba_lxs *S, uint32_t node, uint32_t scope,
                       "none");
             return 0;
         }
-        limba_ltype elem = type_node(S, en, scope, 0, 0);
+        /* the next indices of an array of more may be computed too: the
+           array of all is then computed */
+        limba_ltype elem = type_node(S, en, scope, multi ? where : 0, 0);
         if (!index || !elem)
             return 0;
         if (!limba_types_is_discrete(&S->ts, index)) {
@@ -1087,15 +1089,11 @@ static limba_ltype type_node(limba_lxs *S, uint32_t node, uint32_t scope,
                       lxs_tname(S, index, tb));
             return 0;
         }
-        if (multi && (dyn || (lxs_ty(S, elem)->flags & LIMBA_TF_DYNAMIC))) {
-            lxs_error(S, LXE_UNSUPPORTED, node,
-                      "an array of more indices with bounds computed at run "
-                      "time is not translated yet");
-            return 0;
-        }
+        if (multi && (lxs_ty(S, elem)->flags & LIMBA_TF_DYNAMIC))
+            dyn = true;
         const limba_typeinfo *et = lxs_ty(S, elem);
-        if (et->kind == LIMBA_LTK_OPEN ||
-            (et->flags & (LIMBA_TF_DYNAMIC | LIMBA_TF_INCOMPLETE))) {
+        if (et->kind == LIMBA_LTK_OPEN || (et->flags & LIMBA_TF_INCOMPLETE) ||
+            ((et->flags & LIMBA_TF_DYNAMIC) && !multi)) {
             lxs_error(S, LXE_TYPE_MISMATCH, lxs_node(S, node)->b,
                       "the elements of an array have a size known in "
                       "advance");

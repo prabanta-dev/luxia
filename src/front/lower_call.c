@@ -216,7 +216,8 @@ static const lxl_store *nd_ref_store(const lxl *L, uint32_t a)
 {
     const limba_lx_node *x = &L->S->t->node[a];
     if (x->kind == LXN_REF && L->S->sym[a] &&
-        L->store[L->S->sym[a]].kind == LXL_OPEN)
+        (L->store[L->S->sym[a]].kind == LXL_OPEN ||
+         L->store[L->S->sym[a]].kind == LXL_DYN))
         return &L->store[L->S->sym[a]];
     return NULL;
 }
@@ -235,7 +236,8 @@ static void more_bounds(lxl *L, uint32_t node, uint32_t a, limba_ltype pt,
         at = ti(L, at)->elem;
         ptd = ti(L, ptd)->elem;
         limba_id lo, hi;
-        if (ti(L, at)->kind == LIMBA_LTK_OPEN) {
+        if (st && st->dims) {
+            /* an open parameter, or a computed array: every index */
             lo = st->dims[2 * (d - 1)];
             hi = st->dims[2 * (d - 1) + 1];
         } else {
@@ -245,7 +247,7 @@ static void more_bounds(lxl *L, uint32_t node, uint32_t a, limba_ltype pt,
         }
         out[2 * (d - 1)] = lo;
         out[2 * (d - 1) + 1] = hi;
-        if (ti(L, at)->kind != LIMBA_LTK_OPEN)
+        if (!st || !st->dims)
             continue; /* bounds known: checked by sema */
         limba_ltype pix = ti(L, ptd)->index;
         const limba_typeinfo *pi = ti(L, pix);
@@ -512,20 +514,27 @@ static void builtin(lxl *L, uint32_t node, unsigned id, limba_id *result)
         limba_id p, len, lo, hi;
         if (x->kind == LIMBA_LTK_POINTER)
             x = ti(L, x->elem);
-        lxl_array_parts(L, a0, node, &p, &len, &lo, &hi);
         if (nargs(L, node) == 2) {
-            /* low(a, k) of an open array of more indices (a static one is
-               a constant): the bounds of index k */
+            /* low(a, k) of an array of more indices whose bounds are open,
+               computed or of new (a static one is a constant): those of
+               index k, i64 values */
             __int128 k = 1;
             lxs_value_to_int(S, S->val[arg(L, node, 1)], &k);
-            const lxl_store *st = nd_ref_store(L, a0);
-            if (k > 1 && st && st->dims) {
-                lo = st->dims[2 * (k - 2)];
-                hi = st->dims[2 * (k - 2) + 1];
-            }
-            for (__int128 i = 1; i < k; i++)
-                x = ti(L, x->elem);
+            limba_ltype tt =
+                ti(L, t0)->kind == LIMBA_LTK_POINTER ? ti(L, t0)->elem : t0;
+            uint32_t dims = lxl_dims(L, tt);
+            limba_id *bl = limba_xmalloc(2 * dims * sizeof(*bl));
+            lxl_multi_parts(L, a0, node, &p, bl, bl + dims);
+            lo = bl[k - 1];
+            hi = bl[dims + k - 1];
+            free(bl);
+            *result = id == LXB_LOW ? from_i64(L, lo, rt)
+                      : id == LXB_HIGH
+                          ? from_i64(L, hi, rt)
+                          : lxl_conv(L, length64(L, lo, hi), S->ty_int[3], rt);
+            return;
         }
+        lxl_array_parts(L, a0, node, &p, &len, &lo, &hi);
         if (x->kind == LIMBA_LTK_OPEN) {
             /* the bounds of the argument, i64 values */
             *result = id == LXB_LOW ? from_i64(L, lo, rt)
@@ -884,7 +893,7 @@ static void builtin(lxl *L, uint32_t node, unsigned id, limba_id *result)
         /* an array made by new: its elements, from the bounds in its
            block */
         bool heap = ti(L, target)->kind == LIMBA_LTK_OPEN;
-        limba_ltype counted = heap ? ti(L, target)->elem : target;
+        limba_ltype counted = heap ? lxl_cell_type(L, target) : target;
         if (!lxl_holds_str(L, counted)) {
             /* nil: nothing; freed already: invalid dispose, in mem_free */
             lxl_rt(L, LIMBA_RT_MEM_FREE, LIMBA_T_VOID, &v, 1);
@@ -905,15 +914,25 @@ static void builtin(lxl *L, uint32_t node, unsigned id, limba_id *result)
         limba_ssa_seal(L->ssa, rel);
         L->cur = rel;
         if (heap) {
-            limba_id zero = lxl_iconst(L, LIMBA_T_I64, 0);
-            uint32_t a8[2] = {v, zero}, a16[2] = {v, zero};
-            limba_id lo = un(L, LIMBA_OP_LOADINV, LIMBA_T_I64, v);
-            limba_id hi =
-                un(L, LIMBA_OP_LOADINV, LIMBA_T_I64,
-                   lxl_emit(L, LIMBA_OP_ADDR, LIMBA_T_PTR, 0, 0, 8, a8, 2));
-            limba_id n = length64(L, lo, hi);
+            /* the cells: the product of the lengths at the head */
+            limba_id zero = lxl_iconst(L, LIMBA_T_I64, 0), n = LIMBA_NONE;
+            uint32_t dims = lxl_dims(L, target);
+            for (uint32_t d = 0; d < dims; d++) {
+                uint32_t a0[2] = {v, zero}, a8[2] = {v, zero};
+                limba_id lo = un(L, LIMBA_OP_LOADINV, LIMBA_T_I64,
+                                 d ? lxl_emit(L, LIMBA_OP_ADDR, LIMBA_T_PTR, 0,
+                                              0, (int64_t)(16 * d), a0, 2)
+                                   : v);
+                limba_id hi = un(L, LIMBA_OP_LOADINV, LIMBA_T_I64,
+                                 lxl_emit(L, LIMBA_OP_ADDR, LIMBA_T_PTR, 0, 0,
+                                          (int64_t)(16 * d + 8), a8, 2));
+                limba_id k = length64(L, lo, hi);
+                n = d ? bin(L, LIMBA_OP_MUL, LIMBA_T_I64, n, k) : k;
+            }
+            uint32_t a16[2] = {v, zero};
             lxl_rc(L, LIMBA_OP_RELEASE,
-                   lxl_emit(L, LIMBA_OP_ADDR, LIMBA_T_PTR, 0, 0, 16, a16, 2),
+                   lxl_emit(L, LIMBA_OP_ADDR, LIMBA_T_PTR, 0, 0,
+                            (int64_t)(16 * dims), a16, 2),
                    counted, n);
         } else {
             lxl_rc(L, LIMBA_OP_RELEASE, v, target,

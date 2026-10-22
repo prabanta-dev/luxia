@@ -728,7 +728,8 @@ void lxl_array_parts(lxl *L, uint32_t base, uint32_t at, limba_id *p,
         *hi = un(L, LIMBA_OP_LOADINV, LIMBA_T_I64,
                  addr(L, pv, lxl_iconst(L, LIMBA_T_I64, 0), 0, 8));
         *p = pv;
-        L->heap_disp = 16;
+        /* of more indices: the bounds of each, then the cells */
+        L->heap_disp = 16 * lxl_dims(L, ti(L, pt)->elem);
         return;
     }
     if (x->kind == LXN_REF && L->S->sym[base]) {
@@ -750,9 +751,54 @@ void lxl_array_parts(lxl *L, uint32_t base, uint32_t at, limba_id *p,
                                               : lxl_addr(L, base);
 }
 
-/* a[i1, ..., in] of an array of more indices: the address of the
-   element, by rows (the last index the fastest); the array first, then
-   each index from the left, checked against the bounds of its own */
+uint32_t lxl_multi_parts(lxl *L, uint32_t a, uint32_t at, limba_id *base,
+                         limba_id *lo, limba_id *hi)
+{
+    limba_ltype t = ntype(L, a);
+    if (ti(L, t)->kind == LIMBA_LTK_POINTER)
+        t = ti(L, t)->elem;
+    uint32_t n = lxl_dims(L, t);
+    limba_id p, len, l, h;
+    lxl_array_parts(L, a, at, &p, &len, &l, &h);
+    int64_t disp = L->heap_disp;
+    const limba_typeinfo *x = ti(L, t);
+    const lxl_store *st = nd(L, a)->kind == LXN_REF && L->S->sym[a]
+                              ? &L->store[L->S->sym[a]]
+                              : NULL;
+    limba_id zero = lxl_iconst(L, LIMBA_T_I64, 0);
+    *base = p;
+    if (disp) {
+        /* made by new: the bounds at the head of the block */
+        lo[0] = l;
+        hi[0] = h;
+        for (uint32_t d = 1; d < n; d++) {
+            lo[d] = un(L, LIMBA_OP_LOADINV, LIMBA_T_I64,
+                       addr(L, p, zero, 0, (int64_t)(16 * d)));
+            hi[d] = un(L, LIMBA_OP_LOADINV, LIMBA_T_I64,
+                       addr(L, p, zero, 0, (int64_t)(16 * d + 8)));
+        }
+        *base = addr(L, p, zero, 0, disp);
+    } else if (x->kind == LIMBA_LTK_OPEN || (x->flags & LIMBA_TF_DYNAMIC)) {
+        lo[0] = x->kind == LIMBA_LTK_OPEN ? l : lxl_to_i64(L, l, x->index);
+        hi[0] = x->kind == LIMBA_LTK_OPEN ? h : lxl_to_i64(L, h, x->index);
+        for (uint32_t d = 1; d < n; d++) {
+            lo[d] = st->dims[2 * (d - 1)];
+            hi[d] = st->dims[2 * (d - 1) + 1];
+        }
+    } else {
+        limba_ltype lt = t;
+        for (uint32_t d = 0; d < n; d++, lt = ti(L, lt)->elem) {
+            const limba_typeinfo *ix = ti(L, ti(L, lt)->index);
+            lo[d] = lxl_iconst(L, LIMBA_T_I64, (int64_t)ix->lo);
+            hi[d] = lxl_iconst(L, LIMBA_T_I64, (int64_t)(uint64_t)ix->hi);
+        }
+    }
+    return n;
+}
+
+/* a[i1, ..., in] of an array of more indices: the address of the cell,
+   by rows (the last index the fastest); the array first, then each index
+   from the left, checked against the bounds of its own */
 static limba_id multi_addr(lxl *L, uint32_t node)
 {
     uint32_t *idx = NULL, n = 0, cap = 0, cur = node, root;
@@ -772,46 +818,37 @@ static limba_id multi_addr(lxl *L, uint32_t node)
         idx[i] = idx[n - 1 - i];
         idx[n - 1 - i] = t;
     }
-    limba_ltype dt = ntype(L, root);
-    limba_id p, len, lo, hi;
-    lxl_array_parts(L, root, node, &p, &len, &lo, &hi);
-    const lxl_store *st = nd(L, root)->kind == LXN_REF && L->S->sym[root]
-                              ? &L->store[L->S->sym[root]]
-                              : NULL;
+    limba_id *lo = limba_xmalloc(2 * n * sizeof(*lo)), *hi = lo + n, p;
+    lxl_multi_parts(L, root, node, &p, lo, hi);
+    limba_ltype lt = ntype(L, root);
+    if (ti(L, lt)->kind == LIMBA_LTK_POINTER)
+        lt = ti(L, lt)->elem;
     limba_id off = LIMBA_NONE;
-    for (uint32_t k = 0; k < n; k++) {
-        const limba_typeinfo *at = ti(L, dt);
+    for (uint32_t k = 0; k < n; k++, lt = ti(L, lt)->elem) {
         limba_id i = lxl_value(L, idx[k]);
         limba_ltype it = ntype(L, idx[k]);
         lxl_at(L, node);
-        limba_id i64 = lxl_to_i64(L, i, it), pos, dlen;
-        if (at->kind == LIMBA_LTK_OPEN) {
-            limba_id l = k ? st->dims[2 * (k - 1)] : lo;
-            limba_id h = k ? st->dims[2 * (k - 1) + 1] : hi;
-            bool sg = lxl_signed(L, at->index);
-            limba_id a =
-                cmp(L, false, sg ? LIMBA_CC_SGE : LIMBA_CC_UGE, i64, l);
-            limba_id b =
-                cmp(L, false, sg ? LIMBA_CC_SLE : LIMBA_CC_ULE, i64, h);
-            lxl_check(L, bin(L, LIMBA_OP_AND, LIMBA_T_I1, a, b), LXR_INDEX);
-            pos = bin(L, LIMBA_OP_SUB, LIMBA_T_I64, i64, l);
-            dlen = bin(L, LIMBA_OP_ADD, LIMBA_T_I64,
-                       bin(L, LIMBA_OP_SUB, LIMBA_T_I64, h, l),
-                       lxl_iconst(L, LIMBA_T_I64, 1));
+        limba_id i64 = lxl_to_i64(L, i, it);
+        bool sg = lxl_signed(L, ti(L, lt)->index);
+        limba_id a =
+            cmp(L, false, sg ? LIMBA_CC_SGE : LIMBA_CC_UGE, i64, lo[k]);
+        limba_id b =
+            cmp(L, false, sg ? LIMBA_CC_SLE : LIMBA_CC_ULE, i64, hi[k]);
+        lxl_check(L, bin(L, LIMBA_OP_AND, LIMBA_T_I1, a, b), LXR_INDEX);
+        limba_id pos = bin(L, LIMBA_OP_SUB, LIMBA_T_I64, i64, lo[k]);
+        if (k == 0) {
+            off = pos;
         } else {
-            const limba_typeinfo *ix = ti(L, at->index);
-            check_range(L, i, it, ix->lo, ix->hi, LXR_INDEX);
-            pos = bin(L, LIMBA_OP_SUB, LIMBA_T_I64, i64,
-                      lxl_iconst(L, LIMBA_T_I64, (int64_t)ix->lo));
-            dlen = lxl_iconst(L, LIMBA_T_I64, (int64_t)(ix->hi - ix->lo + 1));
+            limba_id dlen = bin(L, LIMBA_OP_ADD, LIMBA_T_I64,
+                                bin(L, LIMBA_OP_SUB, LIMBA_T_I64, hi[k], lo[k]),
+                                lxl_iconst(L, LIMBA_T_I64, 1));
+            off = bin(L, LIMBA_OP_ADD, LIMBA_T_I64,
+                      bin(L, LIMBA_OP_MUL, LIMBA_T_I64, off, dlen), pos);
         }
-        off = k ? bin(L, LIMBA_OP_ADD, LIMBA_T_I64,
-                      bin(L, LIMBA_OP_MUL, LIMBA_T_I64, off, dlen), pos)
-                : pos;
-        dt = ti(L, dt)->elem;
     }
+    free(lo);
     free(idx);
-    return addr(L, p, off, (int64_t)ti(L, dt)->size, 0);
+    return addr(L, p, off, (int64_t)ti(L, lt)->size, 0);
 }
 
 static limba_id index_addr(lxl *L, uint32_t node)
@@ -1211,16 +1248,13 @@ limba_id lxl_count(lxl *L, limba_id empty, limba_id lo, limba_id hi)
     return lxl_emit(L, LIMBA_OP_SELECT, LIMBA_T_I64, 0, 0, 0, sel, 3);
 }
 
-static limba_id new_array(lxl *L, uint32_t node)
+/* the bounds lo..hi of an index of type ix given to new, i64 values:
+   checked against a range index; the cells of that index */
+static limba_id new_bounds(lxl *L, uint32_t node, limba_ltype ix, limba_id lo,
+                           limba_id hi)
 {
-    const limba_lx_node *tn = nd(L, nd(L, node)->a);
-    limba_ltype at = ti(L, ntype(L, node))->elem;
-    const limba_typeinfo *x = ti(L, at);
-    limba_ltype ix = x->index, ib = lxs_base(L->S, ix), el = x->elem;
+    limba_ltype ib = lxs_base(L->S, ix);
     bool sg = lxl_signed(L, ib);
-    limba_id lo = lxl_to_i64(L, lxl_value(L, tn->b), ib);
-    limba_id hi = lxl_to_i64(L, lxl_value(L, tn->c), ib);
-    lxl_at(L, node);
     limba_id empty = cmp(L, false, sg ? LIMBA_CC_SLT : LIMBA_CC_ULT, hi, lo);
     const limba_typeinfo *ii = ti(L, ix);
     if (ii->flags & LIMBA_TF_RANGE) {
@@ -1228,23 +1262,67 @@ static limba_id new_array(lxl *L, uint32_t node)
                          lxl_iconst(L, LIMBA_T_I64, (int64_t)ii->lo));
         limba_id b = cmp(L, false, sg ? LIMBA_CC_SLE : LIMBA_CC_ULE, hi,
                          lxl_iconst(L, LIMBA_T_I64, (int64_t)(uint64_t)ii->hi));
+        lxl_at(L, node);
         lxl_check(L,
                   bin(L, LIMBA_OP_OR, LIMBA_T_I1, empty,
                       bin(L, LIMBA_OP_AND, LIMBA_T_I1, a, b)),
                   LXR_RANGE);
     }
-    limba_id n = lxl_count(L, empty, lo, hi);
+    return lxl_count(L, empty, lo, hi);
+}
+
+static limba_id new_array(lxl *L, uint32_t node)
+{
+    const limba_lx_node *tn = nd(L, nd(L, node)->a);
+    limba_ltype at = ti(L, ntype(L, node))->elem;
+    const limba_typeinfo *x = ti(L, at);
+    limba_ltype ix = x->index, ib = lxs_base(L->S, ix);
+    limba_ltype el = lxl_cell_type(L, at);
+    uint32_t dims = lxl_dims(L, at), more = nd(L, node)->b;
+    /* the bounds of each index from the left, all before the block */
+    limba_id *bl = limba_xmalloc(2 * dims * sizeof(*bl)), *bh = bl + dims;
+    bl[0] = lxl_to_i64(L, lxl_value(L, tn->b), ib);
+    bh[0] = lxl_to_i64(L, lxl_value(L, tn->c), ib);
+    limba_ltype lev = at;
+    for (uint32_t d = 1; d < dims; d++) {
+        lev = ti(L, lev)->elem;
+        limba_ltype lb = lxs_base(L->S, ti(L, lev)->index);
+        const limba_lx_node *rg = nd(L, list_at(L, more, d - 1));
+        bl[d] = lxl_to_i64(L, lxl_value(L, rg->a), lb);
+        bh[d] = lxl_to_i64(L, lxl_value(L, rg->b), lb);
+    }
+    lxl_at(L, node);
+    limba_id n = new_bounds(L, node, ix, bl[0], bh[0]);
+    lev = at;
+    for (uint32_t d = 1; d < dims; d++) {
+        lev = ti(L, lev)->elem;
+        limba_id k = new_bounds(L, node, ti(L, lev)->index, bl[d], bh[d]);
+        /* n * k past INT64_MAX: out of memory, not a block too small */
+        limba_id zero = lxl_iconst(L, LIMBA_T_I64, 0);
+        uint32_t sel[3] = {cmp(L, false, LIMBA_CC_EQ, k, zero),
+                           lxl_iconst(L, LIMBA_T_I64, 1), k};
+        limba_id kk =
+            lxl_emit(L, LIMBA_OP_SELECT, LIMBA_T_I64, 0, 0, 0, sel, 3);
+        limba_id room = cmp(L, false, LIMBA_CC_ULE, n,
+                            bin(L, LIMBA_OP_UDIV, LIMBA_T_I64,
+                                lxl_iconst(L, LIMBA_T_I64, INT64_MAX), kk));
+        lxl_emit(L, LIMBA_OP_CHECK, LIMBA_T_VOID, 0, LIMBA_TRAP_NOMEM, 0, &room,
+                 1);
+        n = bin(L, LIMBA_OP_MUL, LIMBA_T_I64, n, k);
+    }
+    limba_id lo = bl[0], hi = bh[0];
+    int64_t head = 16 * (int64_t)dims;
     /* 16 + n * size never past INT64_MAX: out of memory, not a block too
        small (this is no check: it cannot be suppressed) */
     uint64_t esize = ti(L, el)->size ? ti(L, el)->size : 1;
     limba_id room =
         cmp(L, false, LIMBA_CC_ULE, n,
-            lxl_iconst(L, LIMBA_T_I64, (int64_t)((INT64_MAX - 16) / esize)));
+            lxl_iconst(L, LIMBA_T_I64, (int64_t)((INT64_MAX - head) / esize)));
     lxl_emit(L, LIMBA_OP_CHECK, LIMBA_T_VOID, 0, LIMBA_TRAP_NOMEM, 0, &room, 1);
     limba_id data = bin(L, LIMBA_OP_MUL, LIMBA_T_I64, n,
                         lxl_iconst(L, LIMBA_T_I64, (int64_t)esize));
-    limba_id bytes =
-        bin(L, LIMBA_OP_ADD, LIMBA_T_I64, data, lxl_iconst(L, LIMBA_T_I64, 16));
+    limba_id bytes = bin(L, LIMBA_OP_ADD, LIMBA_T_I64, data,
+                         lxl_iconst(L, LIMBA_T_I64, head));
     limba_id p = lxl_rt(L, LIMBA_RT_MEM_ALLOC, LIMBA_T_PTR, &bytes, 1);
     uint32_t z[3] = {p, lxl_iconst(L, LIMBA_T_I8, 0), bytes};
     lxl_emit(L, LIMBA_OP_MEMSET, LIMBA_T_VOID, 0, 0, 0, z, 3);
@@ -1254,11 +1332,22 @@ static limba_id new_array(lxl *L, uint32_t node)
     uint32_t s2[2] = {hi,
                       lxl_emit(L, LIMBA_OP_ADDR, LIMBA_T_PTR, 0, 0, 8, a8, 2)};
     lxl_emit(L, LIMBA_OP_STORE, LIMBA_T_VOID, 0, 0, 0, s2, 2);
+    for (uint32_t d = 1; d < dims; d++) {
+        /* the bounds of the next indices after the first's */
+        for (int j = 0; j < 2; j++) {
+            uint32_t ad[2] = {p, lxl_iconst(L, LIMBA_T_I64, 0)};
+            uint32_t sd[2] = {j ? bh[d] : bl[d],
+                              lxl_emit(L, LIMBA_OP_ADDR, LIMBA_T_PTR, 0, 0,
+                                       (int64_t)(16 * d + 8 * j), ad, 2)};
+            lxl_emit(L, LIMBA_OP_STORE, LIMBA_T_VOID, 0, 0, 0, sd, 2);
+        }
+    }
+    free(bl);
     if (lxl_has_narrow(L, el)) {
         uint32_t a16[2] = {p, lxl_iconst(L, LIMBA_T_I64, 0)};
-        lxl_fill_dyn(L,
-                     lxl_emit(L, LIMBA_OP_ADDR, LIMBA_T_PTR, 0, 0, 16, a16, 2),
-                     data, el);
+        lxl_fill_dyn(
+            L, lxl_emit(L, LIMBA_OP_ADDR, LIMBA_T_PTR, 0, 0, head, a16, 2),
+            data, el);
     }
     return p;
 }
@@ -1455,7 +1544,9 @@ void lxl_eq_functions(lxl *L)
         uint32_t who = S->eqs[i + 1];
         if (!(who & LXS_INIT) && S->reached && !S->reached[who])
             continue;
-        eq_declare_all(L, ntype(L, nd(L, S->eqs[i])->a), &list, &n, &cap);
+        uint32_t e = S->eqs[i];
+        eq_declare_all(L, S->argmap[e] ? S->argmap[e] : ntype(L, nd(L, e)->a),
+                       &list, &n, &cap);
     }
     /* the bodies, each after those of its components */
     for (uint32_t i = 0; i < n && !L->stopped; i++)
@@ -1517,8 +1608,88 @@ static void whole_operand(lxl *L, uint32_t node, uint32_t at, limba_id *p,
    left to right, the left one copied first if the right one may change
    it, then the comparison function; an invalid value it meets is a range
    error at the operator */
+/* an operand of a comparison of arrays of more indices: the address of
+   its cells, their number (an i64), the length of each index into len */
+static void multi_operand(lxl *L, uint32_t node, uint32_t at, limba_id *p,
+                          limba_id *n, limba_id *len, uint32_t dims)
+{
+    limba_id *b = limba_xmalloc(2 * dims * sizeof(*b));
+    lxl_multi_parts(L, node, at, p, b, b + dims);
+    for (uint32_t d = 0; d < dims; d++) {
+        limba_id k = bin(L, LIMBA_OP_ADD, LIMBA_T_I64,
+                         bin(L, LIMBA_OP_SUB, LIMBA_T_I64, b[dims + d], b[d]),
+                         lxl_iconst(L, LIMBA_T_I64, 1));
+        limba_id zero = lxl_iconst(L, LIMBA_T_I64, 0);
+        uint32_t sel[3] = {cmp(L, false, LIMBA_CC_SLT, k, zero), zero, k};
+        len[d] = lxl_emit(L, LIMBA_OP_SELECT, LIMBA_T_I64, 0, 0, 0, sel, 3);
+        *n = d ? bin(L, LIMBA_OP_MUL, LIMBA_T_I64, *n, len[d]) : len[d];
+    }
+    free(b);
+}
+
+/* l = r or l <> r between arrays of more indices with open or computed
+   bounds (§ 6.2): the same length index by index, then the cells in order
+   by the comparison of ft, an open array of the cells; different lengths
+   are a difference found before any cell */
+static limba_id compare_multi(lxl *L, uint32_t node, limba_ltype ft)
+{
+    limba_lx_node *x = nd(L, node);
+    unsigned op = x->op;
+    uint32_t l = x->a, r = x->b;
+    limba_ltype lt = ntype(L, l);
+    if (ti(L, lt)->kind == LIMBA_LTK_POINTER)
+        lt = ti(L, lt)->elem;
+    uint32_t dims = lxl_dims(L, lt);
+    limba_ltype et = ti(L, ft)->elem;
+    limba_id *len = limba_xmalloc(2 * dims * sizeof(*len));
+    limba_id a, na, b, nb, heap = LIMBA_NONE;
+    multi_operand(L, l, node, &a, &na, len, dims);
+    if (runs_code(L, r)) {
+        /* the cells of l now: what r runs comes after it (§ 6.7) */
+        limba_id bytes =
+            bin(L, LIMBA_OP_MUL, LIMBA_T_I64, na,
+                lxl_iconst(L, LIMBA_T_I64, (int64_t)ti(L, et)->size));
+        limba_id n1 = bin(L, LIMBA_OP_ADD, LIMBA_T_I64, bytes,
+                          lxl_iconst(L, LIMBA_T_I64, 1));
+        heap = lxl_rt(L, LIMBA_RT_MEM_ALLOC, LIMBA_T_PTR, &n1, 1);
+        lxl_live(L, a);
+        lxl_rc(L, LIMBA_OP_RETAIN, a, et, na);
+        uint32_t o[3] = {heap, a, bytes};
+        lxl_emit(L, LIMBA_OP_MEMCPY, LIMBA_T_VOID, 0, 0, 0, o, 3);
+        a = heap;
+    }
+    multi_operand(L, r, node, &b, &nb, len + dims, dims);
+    lxl_at(L, node);
+    limba_id same = lxl_iconst(L, LIMBA_T_I1, 1);
+    for (uint32_t d = 0; d < dims; d++)
+        same = bin(L, LIMBA_OP_AND, LIMBA_T_I1, same,
+                   cmp(L, false, LIMBA_CC_EQ, len[d], len[dims + d]));
+    free(len);
+    /* other lengths: a count of cells that differs, so that the function
+       says different before reading any */
+    uint32_t sel[3] = {
+        same, nb,
+        bin(L, LIMBA_OP_ADD, LIMBA_T_I64, na, lxl_iconst(L, LIMBA_T_I64, 1))};
+    nb = lxl_emit(L, LIMBA_OP_SELECT, LIMBA_T_I64, 0, 0, 0, sel, 3);
+    lxl_live(L, a);
+    lxl_live(L, b);
+    limba_id st = L->dry ? lxl_iconst(L, LIMBA_T_I32, EQ_SAME)
+                         : eq_call(L, ft, a, na, b, nb);
+    if (heap != LIMBA_NONE) {
+        lxl_rc(L, LIMBA_OP_RELEASE, heap, et, na);
+        lxl_rt(L, LIMBA_RT_MEM_FREE, LIMBA_T_VOID, &heap, 1);
+    }
+    lxl_check(
+        L, cmp(L, false, LIMBA_CC_NE, st, lxl_iconst(L, LIMBA_T_I32, EQ_BAD)),
+        LXR_RANGE);
+    return cmp(L, false, op == LX_EQ ? LIMBA_CC_EQ : LIMBA_CC_NE, st,
+               lxl_iconst(L, LIMBA_T_I32, EQ_SAME));
+}
+
 static limba_id compare_whole(lxl *L, uint32_t node)
 {
+    if (L->S->argmap[node])
+        return compare_multi(L, node, L->S->argmap[node]);
     limba_lx_node *x = nd(L, node);
     unsigned op = x->op;
     uint32_t l = x->a, r = x->b;

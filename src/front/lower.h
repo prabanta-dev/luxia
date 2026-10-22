@@ -155,6 +155,8 @@ typedef struct {
 
 /* the indices of array type t: 1, or more for an array of more */
 uint32_t lxl_dims(const lxl *L, limba_ltype t);
+/* the type of the cells of array type t: its elements past every index */
+limba_ltype lxl_cell_type(const lxl *L, limba_ltype t);
 
 /* IR types */
 limba_id lxl_type(lxl *L, limba_ltype t);
@@ -244,6 +246,11 @@ bool lxl_signed(const lxl *L, limba_ltype t);
    values, whatever it is (static, computed, open, made by new) */
 void lxl_span(lxl *L, uint32_t a, uint32_t at, limba_id *base, limba_id *lo,
               limba_id *hi);
+/* array node a of n indices, whatever it is (static, open, computed,
+   made by new): the address of its first cell, the bounds of each index
+   (i64 values, into lo and hi, n of each); n given back */
+uint32_t lxl_multi_parts(lxl *L, uint32_t a, uint32_t at, limba_id *base,
+                         limba_id *lo, limba_id *hi);
 /* the comparison functions of the records and arrays compared in what
    is reached (§ 6.2), each after those of its components */
 void lxl_eq_functions(lxl *L);

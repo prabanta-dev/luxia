@@ -222,7 +222,10 @@ typedef struct {
     /* per CALL node of a routine with arguments by name or default
        values: 1 + where in argpool the argument of each parameter is, in
        the order of the parameters (the value of a name => value, or the
-       default value of the declaration); 0: the arguments as written */
+       default value of the declaration); 0: the arguments as written.
+       Per comparison (=, <>) of arrays of more indices one of which has
+       its bounds open or computed: the type its cells are compared as,
+       an open array of one index (§ 6.2) */
     uint32_t *argmap;
     uint32_t *argpool;
     uint32_t nargpool, capargpool;

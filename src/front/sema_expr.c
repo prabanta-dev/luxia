@@ -286,6 +286,8 @@ static limba_ltype compared_agg_type(limba_lxs *S, limba_ltype t)
     return t;
 }
 
+static bool open_fits(limba_lxs *S, limba_ltype at, limba_ltype pt);
+
 /* = and <> between records and arrays (§ 6.2): the same type, or an open
    operand and an array that could be passed to it; an aggregate (agg) has
    the type of the other operand, or one made for its own length */
@@ -298,19 +300,19 @@ static limba_ltype compare_whole(limba_lxs *S, uint32_t node, unsigned op,
         return op_error(S, node, composite(S, lt) ? lt : rt,
                         "compares scalars and strings");
     unsigned lk = kind(S, lt), rk = kind(S, rt);
-    if ((lk == LIMBA_LTK_OPEN && (lxs_ty(S, lt)->flags & LIMBA_TF_MULTI)) ||
-        (rk == LIMBA_LTK_OPEN && (lxs_ty(S, rt)->flags & LIMBA_TF_MULTI))) {
-        lxs_error(S, LXE_UNSUPPORTED, node,
-                  "'%s' of an open array of more indices is not translated "
-                  "yet: compare the elements",
-                  ot);
-        return set(S, node, 0);
-    }
     bool arrays = (lk == LIMBA_LTK_ARRAY || lk == LIMBA_LTK_OPEN) &&
                   (rk == LIMBA_LTK_ARRAY || rk == LIMBA_LTK_OPEN);
     bool ok = lxs_compatible(S, lt, rt);
-    if (!ok && arrays &&
-        (agg || lk == LIMBA_LTK_OPEN || rk == LIMBA_LTK_OPEN)) {
+    bool lm = arrays && (lxs_ty(S, lt)->flags & LIMBA_TF_MULTI);
+    bool rm = arrays && (lxs_ty(S, rt)->flags & LIMBA_TF_MULTI);
+    if (!ok && (lm || rm) &&
+        (agg || lk == LIMBA_LTK_OPEN || rk == LIMBA_LTK_OPEN ||
+         ((lxs_ty(S, lt)->flags | lxs_ty(S, rt)->flags) & LIMBA_TF_DYNAMIC))) {
+        /* arrays of more indices: as many, of one base index by index,
+           cells of one type */
+        ok = lm && rm && (open_fits(S, lt, rt) || open_fits(S, rt, lt));
+    } else if (!ok && arrays &&
+               (agg || lk == LIMBA_LTK_OPEN || rk == LIMBA_LTK_OPEN)) {
         const limba_typeinfo *x = lxs_ty(S, lt), *y = lxs_ty(S, rt);
         if (!lxs_compatible(S, x->elem, y->elem)) {
             lxs_error(S, LXE_TYPE_MISMATCH, node,
@@ -335,6 +337,19 @@ static limba_ltype compare_whole(limba_lxs *S, uint32_t node, unsigned op,
                   "only with their own type",
                   ot, lxs_tname(S, lt, ta), lxs_tname(S, rt, tb));
         return set(S, node, 0);
+    }
+    /* arrays of more indices with open or computed bounds: the same
+       bounds index by index, then their cells in order, as an open array
+       of one index */
+    const limba_typeinfo *x = lxs_ty(S, lt), *y = lxs_ty(S, rt);
+    if (arrays && (x->flags & LIMBA_TF_MULTI) &&
+        (lk == LIMBA_LTK_OPEN || rk == LIMBA_LTK_OPEN ||
+         ((x->flags | y->flags) & LIMBA_TF_DYNAMIC))) {
+        limba_ltype cell = lt;
+        while (lxs_ty(S, cell)->flags & LIMBA_TF_MULTI)
+            cell = lxs_ty(S, cell)->elem;
+        cell = lxs_ty(S, cell)->elem;
+        S->argmap[node] = limba_types_open(&S->ts, S->ty_int[3], cell);
     }
     LIMBA_GROW(S->eqs, S->neqs, S->capeqs);
     S->eqs[S->neqs++] = node;
@@ -660,14 +675,6 @@ static limba_ltype index_expr(limba_lxs *S, uint32_t node, uint32_t scope)
         lxs_expr(S, idx, scope, 0);
         return set(S, node, 0);
     }
-    if (multi && ti->kind == LIMBA_LTK_OPEN && S->type[base] &&
-        lxs_ty(S, S->type[base])->kind == LIMBA_LTK_POINTER) {
-        lxs_error(S, LXE_UNSUPPORTED, node,
-                  "an array of more indices made by new is not translated "
-                  "yet");
-        lxs_expr(S, idx, scope, 0);
-        return set(S, node, 0);
-    }
     switch (ti->kind) {
     case LIMBA_LTK_ARRAY:
         index = ti->index;
@@ -802,13 +809,6 @@ static void routine_arg(limba_lxs *S, uint32_t a, uint32_t scope, limba_param p)
         /* the same elements, an index of the same base (§ 4.5), index by
            index for an array of more; an aggregate takes its bounds from
            the parameter (§ 6.8) */
-        bool pmulti = lxs_ty(S, p.type)->flags & LIMBA_TF_MULTI;
-        if (pmulti && lxs_node(S, a)->kind == LXN_AGG) {
-            lxs_error(S, LXE_UNSUPPORTED, a,
-                      "an aggregate for an open array of more indices is not "
-                      "translated yet: declare a variable");
-            return;
-        }
         limba_ltype at =
             lxs_expr(S, a, scope, lxs_node(S, a)->kind == LXN_AGG ? p.type : 0);
         if (at && !open_fits(S, at, p.type))
@@ -1772,6 +1772,20 @@ static int agg_by_lo(const void *a, const void *b)
 /* an array aggregate for t: an array with fixed or computed bounds, or an
    open-array parameter, whose aggregate gets an array type of its own
    with the bounds of § 6.8 */
+/* two arrays of the same bounds, index by index */
+static bool same_bounds(limba_lxs *S, limba_ltype a, limba_ltype b)
+{
+    const limba_typeinfo *x = lxs_ty(S, a), *y = lxs_ty(S, b);
+    if (x->kind != LIMBA_LTK_ARRAY || y->kind != LIMBA_LTK_ARRAY)
+        return false;
+    const limba_typeinfo *i = lxs_ty(S, x->index), *j = lxs_ty(S, y->index);
+    if (i->lo != j->lo || i->hi != j->hi ||
+        (x->flags & LIMBA_TF_MULTI) != (y->flags & LIMBA_TF_MULTI))
+        return false;
+    return (x->flags & LIMBA_TF_MULTI) ? same_bounds(S, x->elem, y->elem)
+                                       : true;
+}
+
 static limba_ltype agg_array(limba_lxs *S, uint32_t node, uint32_t scope,
                              limba_ltype t)
 {
@@ -1780,8 +1794,15 @@ static limba_ltype agg_array(limba_lxs *S, uint32_t node, uint32_t scope,
     const limba_typeinfo *ti = lxs_ty(S, t);
     bool open = ti->kind == LIMBA_LTK_OPEN;
     bool dyn = !open && (ti->flags & LIMBA_TF_DYNAMIC);
+    bool multi = ti->flags & LIMBA_TF_MULTI;
     limba_ltype it = ti->index, et = ti->elem, base = lxs_base(S, it);
     char ib[64], tb[128];
+    if (dyn && multi) {
+        lxs_error(S, LXE_UNSUPPORTED, node,
+                  "an aggregate for an array of more indices with computed "
+                  "bounds is not translated yet: assign the elements");
+        return set(S, node, 0);
+    }
     if (x->flags & LXN_F_SEMI)
         lxs_error(S, LXE_AGG_FORM, node,
                   "the elements of an array aggregate are separated by ','");
@@ -1852,7 +1873,24 @@ static limba_ltype agg_array(limba_lxs *S, uint32_t node, uint32_t scope,
             }
             npos++;
         }
-        agg_value(S, comp, scope, et, &known);
+        if (multi) {
+            /* the elements of an array of more indices are aggregates of
+               the next indices: the array has no rows of its own */
+            uint32_t v = lxs_node(S, comp)->c;
+            if (lxs_node(S, v)->kind != LXN_AGG) {
+                lxs_error(S, LXE_AGG_FORM, v,
+                          "an aggregate of an array of more indices holds "
+                          "aggregates of the next indices: {{1, 2}, {3, 4}}");
+                ok = false;
+            }
+            lxs_expr(S, v, scope, et);
+            if (!open)
+                lxs_assign_to(S, v, et, "the aggregate");
+            if (!agg_known(S, v))
+                known = false;
+        } else {
+            agg_value(S, comp, scope, et, &known);
+        }
     }
     /* the indices given: twice, missing */
     if (nsp)
@@ -1908,10 +1946,35 @@ static limba_ltype agg_array(limba_lxs *S, uint32_t node, uint32_t scope,
                 lo = hi = 0;
             }
         }
+        limba_ltype row = et;
+        if (ok && multi) {
+            /* the rows, aggregates of the next indices: all of the same
+               bounds, the type of the first */
+            row = 0;
+            for (uint32_t i = 0; i < n && ok; i++) {
+                uint32_t v = lxs_node(S, limba_lx_list_at(S->t, list, i))->c;
+                limba_ltype rt = S->type[v];
+                if (!rt) {
+                    ok = false;
+                } else if (!row) {
+                    row = rt;
+                } else if (!same_bounds(S, row, rt)) {
+                    lxs_error(S, LXE_AGG_LENGTH, v,
+                              "the aggregates of the next indices have the "
+                              "same bounds: %s and %s",
+                              lxs_tname(S, row, ib), lxs_tname(S, rt, tb));
+                    ok = false;
+                }
+            }
+            if (!row)
+                ok = false;
+        }
         if (ok) {
             bool fits;
             limba_ltype idx = limba_types_range(&S->ts, base, lo, hi);
-            result = limba_types_array(&S->ts, idx, et, false, &fits);
+            result = limba_types_array(&S->ts, idx, row, false, &fits);
+            if (multi)
+                S->ts.t[result].flags |= LIMBA_TF_MULTI;
         }
     } else if (!dyn && ok) {
         const limba_typeinfo *ix = lxs_ty(S, it);
@@ -2120,8 +2183,36 @@ limba_ltype lxs_expr(limba_lxs *S, uint32_t node, uint32_t scope,
             limba_ltype ib = lxs_base(S, lxs_ty(S, ot)->index);
             arg_of(S, tn->b, scope, ib);
             arg_of(S, tn->c, scope, ib);
-            x->flags |= LXN_F_HEAP;
+            /* new(M range a..b, c..d): the bounds of every index */
+            uint32_t more = lxs_node(S, node)->b;
+            uint32_t nmore = more ? lxs_node(S, more)->b : 0, dims = 1;
+            for (limba_ltype d = ot; lxs_ty(S, d)->flags & LIMBA_TF_MULTI;
+                 d = lxs_ty(S, d)->elem)
+                dims++;
+            if (nmore != dims - 1) {
+                lxs_error(S, LXE_MULTI_INDEX, node,
+                          "new of an open array of %u ind%s takes the bounds "
+                          "of each: new(A range a..b%s)",
+                          dims, dims == 1 ? "ex" : "ices",
+                          dims == 1 ? "" : ", c..d");
+                return set(S, node, 0);
+            }
+            limba_ltype lev = ot;
+            for (uint32_t i = 0; i < nmore; i++) {
+                lev = lxs_ty(S, lev)->elem;
+                limba_ltype lb = lxs_base(S, lxs_ty(S, lev)->index);
+                uint32_t rg = limba_lx_list_at(S->t, more, i);
+                arg_of(S, lxs_node(S, rg)->a, scope, lb);
+                arg_of(S, lxs_node(S, rg)->b, scope, lb);
+            }
+            lxs_node(S, node)->flags |= LXN_F_HEAP;
             return set(S, node, limba_types_pointer(&S->ts, ot));
+        }
+        if (lxs_node(S, node)->b) {
+            lxs_error(S, LXE_MULTI_INDEX, node,
+                      "the bounds after the first go only with an open array "
+                      "of more indices");
+            return set(S, node, 0);
         }
         limba_ltype t = lxs_type(S, x->a, scope, 0);
         return set(S, node, t ? limba_types_pointer(&S->ts, t) : 0);

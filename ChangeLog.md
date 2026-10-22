@@ -6,9 +6,13 @@
   § 3.7.2): `a[i, j]`, laid out by rows as in C; `low(a, k)`,
   `high(a, k)`, `length(a, k)`; aggregates nested by index; open
   parameters of more indices, `array[I range <>, J range <>] of T`.
-  Arrays of arrays stay a form of their own. Code L0092. Not yet: computed
-  bounds, `new`, an open one compared whole or given an aggregate
-  (L0054). `lx_gen` writes arrays of two indices.
+  Arrays of arrays stay a form of their own. Code L0092. `lx_gen` writes
+  arrays of two indices.
+- Arrays of more indices with computed bounds, made by
+  `new(M range a..b, c..d)`, compared whole when their bounds are open or
+  computed (the same lengths index by index, then the cells), and given
+  aggregates when open. Not yet: an aggregate as the initial value of one
+  with computed bounds (L0054). `lx_gen` writes them too.
 - Fixed: comparing arrays of arrays as a whole made `luxia` refuse the
   program ("function 2 is not declared"): every comparison function is
   now declared before the first body is given.

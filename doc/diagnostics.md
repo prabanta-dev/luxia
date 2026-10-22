@@ -1160,9 +1160,8 @@ prog.luxia:2:11: error[L0056]: the out parameter 'r' may leave without a value
 A valid program that this version of `luxia` cannot translate yet: a
 `case` label that is a range of more than 4096 values; a value too large
 for the stack ("a value too large for the stack is not translated yet");
-an array of more indices (§ 3.7.2) with computed bounds or made by `new`,
-an open one compared as a whole or given an aggregate, or one of more
-than 8 open indices. These are limits of the compiler, not rules of the
+an aggregate as the initial value of an array of more indices (§ 3.7.2)
+with computed bounds, or an open array of more than 8 indices. These are limits of the compiler, not rules of the
 language.
 
 ```pascal
@@ -1871,7 +1870,8 @@ An array of more indices takes all its indices in one pair of brackets,
 `a[i, j]`, and an array of arrays one per pair, `a[i][j]`; the indices
 of a type are all open or none; `low(a, k)`, `high(a, k)` and
 `length(a, k)` take an array of more indices and a constant `k` from 1
-to the number of its indices (§ 3.7.2).
+to the number of its indices (§ 3.7.2); `new` of an open array of more
+indices takes the bounds of each, and only that (§ 9.7).
 
 ```pascal
 program p;
