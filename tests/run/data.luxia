@@ -31,6 +31,10 @@ type
   Sparse = array[Int32 range 1..1000] of Int32;
   Tags = array[Int32 range 1..40] of Entry;
   Rows = array[Int32 range 1..30] of Row;
+  Word = record s: String; n: Int32; end;
+  Words2 = array[Int32 range 1..50] of Word;
+  Line = array[Int32 range 1..100] of Int32;
+  Lines2 = array[Int32 range 1..4] of Line;
 
 const
   Big: Entry = {k: 123456789012345678901234567890; name: "big"; tag: -3};
@@ -44,6 +48,8 @@ const
   Labels: Tags = {3: {k: 0; name: "three"; tag: 3},
                   else {k: 5; name: "rest"; tag: -1}};
   Lines: Rows = {1: {else 1}, else {6: 6, else 2}};
+  Said: Words2 = {1: {s: "one"; n: 1}, else {s: "w"; n: 3}};
+  Planes: Lines2 = {else {1: 9, else 1}};
 
 var
   w, w2: Words := {"zero", "one", else "many"};
@@ -88,5 +94,8 @@ begin
           Labels[40].tag, " ", Labels[3].tag);
   writeln(Lines[1][6], " ", Lines[2][1], " ", Lines[30][6], " ",
           Lines[30][5]);
+  writeln(Said[1].s, " ", Said[2].s, Said[50].s, " ", Said[50].n);
+  writeln(Planes[1][1], " ", Planes[1][2], " ", Planes[4][1], " ",
+          Planes[4][100]);
   Local();
 end.

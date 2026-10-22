@@ -17,9 +17,10 @@
   their globals (version 7 of Limba's IR, data and relocations), no
   longer stores at the start of `main`; a String is a relocation to an
   immortal string. Whatever the size of the global: a run of one value
-  of 256 bytes or more is a loop at the start of `main` (nothing for
-  zeros), and `main` stores a BigInt other than 0 and what lies past a
-  long run. `lx_gen` gives half of the global records and arrays an
+  of 256 bytes or more is one element written once with its count (a
+  fill of version 8 of the IR), zeros are not written, and `main` stores
+  only a BigInt other than 0 (and fills in a loop a run whose element
+  holds one). `lx_gen` gives half of the global records and arrays an
   aggregate of literals and prints them first; its oracle computes the
   mathematical functions with Limba's library, the bits of every engine.
 - Arrays of more indices, `array[I, J] of T`, as in Ada (specification
