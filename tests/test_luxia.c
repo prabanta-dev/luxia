@@ -2254,6 +2254,7 @@ static char *run_units(const limba_lxgen *p, char *end, size_t size,
     for (int level = 0; level < 2; level++) {
         snprintf(ends[level], sizeof(ends[level]), "errors");
         limba_luxia_options o = {0};
+        o.verify = true; /* an IR not valid is an error, not a crash */
         o.level = level;
         o.read_unit = lib_reader;
         o.read_ctx = (void *)p;
@@ -2956,6 +2957,7 @@ static int test_unit_module(void)
         ""};
     int failures = 0;
     limba_luxia_options o = {0};
+    o.verify = true; /* an IR not valid is an error, not a crash */
     o.read_unit = case_reader;
     o.read_ctx = (void *)&c;
     limba_luxia_consumer k = {0};
@@ -2991,6 +2993,7 @@ static int test_unit_module(void)
 static int test_unit_files(void)
 {
     limba_luxia_options o = {0};
+    o.verify = true; /* an IR not valid is an error, not a crash */
     o.stdlib_path = "tests/units/std";
     limba_luxia_consumer k = {0};
     k.keep_bodies = true;
@@ -3032,6 +3035,7 @@ static int test_eq_names(void)
     int failures = 0;
     for (int i = 0; i < 2; i++) {
         limba_luxia_options o = {0};
+        o.verify = true; /* an IR not valid is an error, not a crash */
         limba_luxia_consumer k = {0};
         k.keep_bodies = true;
         limba_module *m = NULL;
@@ -3071,6 +3075,7 @@ static int test_units(void)
         diag_text dt = {{0}, 0};
         for (int level = 0; level < 2; level++) {
             limba_luxia_options o = {0};
+            o.verify = true; /* an IR not valid is an error, not a crash */
             o.level = level;
             o.read_unit = case_reader;
             o.read_ctx = (void *)c;

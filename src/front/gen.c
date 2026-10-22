@@ -375,6 +375,12 @@ typedef struct {
     bool sealed;
     uint32_t rt;
     uint32_t par[4];
+    /* overloading (Luxia 1, step 2): named as routine alias - 1 (0: its
+       own name), overload written; an operator (index in optext + 1,
+       written between its operands); a str for its record parameter */
+    uint32_t alias;
+    bool ovl, isstr;
+    uint8_t opk;
     uint32_t def[4]; /* the default value of each parameter, 0 for none:
                         a literal, on the last parameters only */
     uint8_t np;
@@ -432,6 +438,9 @@ typedef struct {
     /* and the web of units around it, NULL for none */
     struct web *web;
     bool lib_named; /* the program names a routine of Lib */
+    /* routines named by their numbers, as their own: while Lib is chosen,
+       so that a name says the routine it is */
+    bool real_names;
     /* the arrays of two indices: m[i, j] = i * a + j * b + c on
        lo1..hi1, lo2..hi2, times k when scaled; element i1, j1 written,
        the total with weight w; the [ of that element */
@@ -1121,6 +1130,11 @@ static uint32_t call_expr(G *g, uint32_t fn, int d)
 {
     bool omit[4];
     bool named = plan_omit(g, fn, omit);
+    /* an operator or a str: its operands by position, never an aggregate
+       (it has no type of its own there) */
+    bool plain = g->r[fn].opk || g->r[fn].isstr;
+    if (plain)
+        named = false;
     uint32_t a[4];
     uint32_t np = g->r[fn].np;
     for (uint32_t k = 0; k < np; k++) {
@@ -1142,7 +1156,7 @@ static uint32_t call_expr(G *g, uint32_t fn, int d)
                         ? pick_agg_func(g, pt)
                         : -1;
             a[k] = h >= 0 ? call_expr(g, (uint32_t)h, d - 1)
-                   : is_record(g, pt) && d > 0 && chance(g, 20) &&
+                   : !plain && is_record(g, pt) && d > 0 && chance(g, 20) &&
                            g->v[g->r[fn].par[k]].kind == V_IN
                        ? agg_literal(g, pt, d - 1)
                        : typed_arg(g, pt, false);
@@ -1164,6 +1178,8 @@ static uint32_t call_expr(G *g, uint32_t fn, int d)
     g->e[i].named = named;
     g->e[i].npos = npos;
     g->e[i].pmap = keep_list(g, order, nw);
+    if (g->r[fn].isstr && chance(g, 50))
+        g->e[i].op = 1; /* in writeln, written as its argument */
     return i;
 }
 
@@ -1439,8 +1455,8 @@ static uint32_t agg_expr(G *g, uint32_t t, int d)
 static uint32_t agg_part(G *g, unsigned t, int d)
 {
     int fn = pick_agg_func(g, 0);
-    if (fn < 0)
-        return 0;
+    if (fn < 0 || g->r[fn].opk)
+        return 0; /* an operator's result has no .f: it is no designator */
     uint32_t rt = g->r[fn].rt;
     if (is_record(g, rt)) {
         uint32_t n = 0, f = 0;
@@ -4087,6 +4103,131 @@ static void routine(G *g)
     }
 }
 
+/* ---- overloading and operators (Luxia 1, step 2) ---- */
+
+/* what one argument tells apart: two routines whose first parameters are
+   of different classes are never reached by the same arguments, nor by
+   a constant without a type (§ 8.8) */
+static unsigned param_class(const G *g, uint32_t t)
+{
+    if (is_ptr(g, t))
+        return 1;
+    if (is_record(g, t))
+        return 2;
+    if (is_array(g, t) || g->ty[t].k == K_OPEN || g->ty[t].k == K_DYN)
+        return 3;
+    if (is_enum(g, t))
+        return 4;
+    unsigned b = base(g, t);
+    if (b == T_BOOL)
+        return 5;
+    if (b == T_STR)
+        return 6;
+    if (fam(b) == 'C')
+        return 7;
+    return 8; /* a number: integers, Bits, reals, BigInt */
+}
+
+/* routines of one name: some pairs of routines whose first parameters
+   tell them apart take one name, overload on each */
+static void overload_twins(G *g)
+{
+    for (uint32_t r = 0; r < g->nr; r++) {
+        xr *x = &g->r[r];
+        if (x->ovl || x->opk || x->isstr || !x->np || x->def[0] ||
+            !chance(g, 30))
+            continue;
+        unsigned cr = param_class(g, g->v[x->par[0]].t);
+        uint32_t n = 0, pick = 0;
+        for (uint32_t q = 0; q < g->nr; q++) {
+            const xr *y = &g->r[q];
+            if (q == r || y->ovl || y->opk || y->isstr || !y->np || y->def[0] ||
+                param_class(g, g->v[y->par[0]].t) == cr)
+                continue;
+            if (below(g, ++n) == 0)
+                pick = q;
+        }
+        if (!n)
+            continue;
+        g->r[pick].alias = r + 1;
+        g->r[pick].ovl = true;
+        g->r[r].ovl = true;
+    }
+}
+
+/* a function of the program on values of record type t: an operator
+   (opk, its arity np) or the str of t; its body as routine makes one */
+static void shaped(G *g, uint32_t t, uint8_t opk, uint8_t np, bool str)
+{
+    LIMBA_GROW(g->r, g->nr, g->capr);
+    uint32_t id = g->nr++;
+    memset(&g->r[id], 0, sizeof(xr));
+    xr *x = &g->r[id];
+    x->func = true;
+    x->opk = opk;
+    x->isstr = str;
+    x->np = np;
+    x->rt = str ? T_STR : opk == 4 || opk == 5 ? T_BOOL : t;
+    uint32_t mark = g->nscope;
+    for (uint32_t k = 0; k < np; k++) {
+        uint32_t p = new_v(g, t, V_IN);
+        g->r[id].par[k] = p;
+        show(g, p);
+    }
+    g->cur = (int)id;
+    uint32_t n;
+    uint32_t b = block(g, 1 + (int)below(g, 3), &n);
+    uint32_t s = new_s(g, S_RETURN);
+    uint32_t rt = g->r[id].rt;
+    if (!is_scalar(g, rt)) {
+        /* a copy of an operand, a field changed: var v := a; v.f := e */
+        uint32_t v = new_v(g, rt, V_LOCAL);
+        uint32_t decl = new_s(g, S_VAR);
+        uint32_t src = var_ref(g, g->r[id].par[below(g, np)]);
+        g->st[decl].var = v;
+        g->st[decl].e = src;
+        append(g, &b, &n, decl, false);
+        uint32_t a = new_s(g, S_ASSIGN);
+        uint32_t f = below(g, g->ty[rt].elem);
+        g->st[a].var = v;
+        g->st[a].fld = f + 1;
+        uint32_t e = value_for(g, field_type(g, rt, f), depth(g));
+        g->st[a].e = e;
+        append(g, &b, &n, a, false);
+        g->st[s].e = var_ref(g, v);
+    } else {
+        g->st[s].e = value_for(g, rt, depth(g));
+    }
+    append(g, &b, &n, s, false);
+    g->r[id].blk = b;
+    g->r[id].nblk = n;
+    g->cur = -1;
+    g->nscope = mark;
+}
+
+/* operators and a str for some records of the program, each once */
+static void shaped_all(G *g)
+{
+    for (uint32_t t = NTYPES; t < g->nty; t++) {
+        if (!is_record(g, t) || g->ty[t].elem == 0 || chance(g, 40))
+            continue;
+        /* the operators made for t: bit opk - 1, bit 5 the - of one */
+        unsigned used = 0;
+        for (uint32_t k = 0, n = 1 + below(g, 2); k < n; k++) {
+            uint8_t opk = (uint8_t)(1 + below(g, 5));
+            /* - of one operand sometimes, the others of two */
+            uint8_t np = opk == 2 && chance(g, 40) ? 1 : 2;
+            unsigned bit = np == 1 ? 1u << 5 : 1u << (opk - 1);
+            if (used & bit)
+                continue;
+            used |= bit;
+            shaped(g, t, opk, np, false);
+        }
+        if (chance(g, 50))
+            shaped(g, t, 0, 1, true);
+    }
+}
+
 /* ---- the source ---- */
 
 typedef struct {
@@ -4148,6 +4289,24 @@ static void put_name(text *o, const G *g, uint32_t v)
     putf(o, "%c%u", vprefix[g->v[v].kind], v);
 }
 
+/* the operators the generator defines for its records (§ 6.9) */
+static const char *const optext[] = {"+", "-", "*", "<", ">"};
+
+/* the name a routine is written with: its own, the one of its twin of
+   another profile (§ 8.8), str, or an operator between quotes */
+static void put_own(text *o, const G *g, uint32_t r)
+{
+    const xr *x = &g->r[r];
+    if (!g->real_names && x->isstr) {
+        put(o, "str");
+    } else if (!g->real_names && x->opk) {
+        putf(o, "\"%s\"", optext[x->opk - 1]);
+    } else {
+        uint32_t a = !g->real_names && x->alias ? x->alias - 1 : r;
+        putf(o, "%c%u", g->r[a].func ? 'f' : 'p', a);
+    }
+}
+
 static void put_rname(text *o, const G *g, uint32_t r)
 {
     /* a routine of Lib named by the program: directly, or qualified
@@ -4156,7 +4315,7 @@ static void put_rname(text *o, const G *g, uint32_t r)
         put(o, "Lib.");
     if (g->moved && g->moved[r] && !o->lbase)
         ((G *)g)->lib_named = true;
-    putf(o, "%c%u", g->r[r].func ? 'f' : 'p', r);
+    put_own(o, g, r);
 }
 
 /* the names of the types are upper case letters that no variable takes
@@ -4285,6 +4444,26 @@ static void pexpr(G *g, text *o, uint32_t i)
         put(o, ")");
         break;
     case E_CALL:
+        if (g->r[x->fn].opk && x->nargs == 2) {
+            /* an operator the program defines, between its operands */
+            put(o, "(");
+            pexpr(g, o, g->ls[g->e[i].args]);
+            put(o, " ");
+            here(&g->e[i], o);
+            put(o, optext[g->r[g->e[i].fn].opk - 1]);
+            put(o, " ");
+            pexpr(g, o, g->ls[g->e[i].args + 1]);
+            put(o, ")");
+            break;
+        }
+        if (g->r[x->fn].opk) {
+            put(o, "(");
+            here(x, o);
+            putf(o, "%s(", optext[g->r[x->fn].opk - 1]);
+            pexpr(g, o, g->ls[g->e[i].args]);
+            put(o, "))");
+            break;
+        }
         here(x, o);
         put_rname(o, g, x->fn);
         pcall_args(g, o, x->fn, x->args, x->nargs, x->named, x->npos, x->pmap);
@@ -4487,17 +4666,6 @@ static void pcall_args(G *g, text *o, uint32_t fn, uint32_t args, uint32_t n,
     put(o, ")");
 }
 
-static void pargs(G *g, text *o, uint32_t args, uint32_t n)
-{
-    put(o, "(");
-    for (uint32_t k = 0; k < n; k++) {
-        if (k)
-            put(o, ", ");
-        pexpr(g, o, g->ls[args + k]);
-    }
-    put(o, ")");
-}
-
 static void pstmt(G *g, text *o, uint32_t si, int ind)
 {
     xs s = g->st[si];
@@ -4628,9 +4796,18 @@ static void pstmt(G *g, text *o, uint32_t si, int ind)
         break;
     }
     case S_WRITE:
-        put(o, "writeln");
-        pargs(g, o, s.args, s.nargs);
-        put(o, ";\n");
+        put(o, "writeln(");
+        for (uint32_t k = 0; k < s.nargs; k++) {
+            uint32_t a = g->ls[s.args + k];
+            if (k)
+                put(o, ", ");
+            /* writeln(v) writes v with the str of its type (§ 9.1) */
+            if (g->e[a].k == E_CALL && g->r[g->e[a].fn].isstr && g->e[a].op)
+                pexpr(g, o, g->ls[g->e[a].args]);
+            else
+                pexpr(g, o, a);
+        }
+        put(o, ");\n");
         break;
     case S_CALL:
         put_rname(o, g, s.fn);
@@ -4881,7 +5058,7 @@ static void routine_text(G *g, text *o, uint32_t r, bool heading)
 {
     const xr *x = &g->r[r];
     put(o, x->func ? "\nfunction " : "\nprocedure ");
-    putf(o, "%c%u", x->func ? 'f' : 'p', r);
+    put_own(o, g, r);
     put(o, "(");
     for (uint32_t k = 0; k < x->np; k++) {
         uint32_t p = x->par[k];
@@ -4904,13 +5081,17 @@ static void routine_text(G *g, text *o, uint32_t r, bool heading)
         put(o, ": ");
         put_type(o, g, x->rt);
     }
+    if ((x->ovl || x->isstr) && !g->real_names)
+        put(o, "; overload");
     if (heading) {
         put(o, ";\n");
         return;
     }
     put(o, ";\nbegin\n");
     pblock(g, o, x->blk, x->nblk, 1);
-    putf(o, "end %c%u;\n", x->func ? 'f' : 'p', r);
+    put(o, "end ");
+    put_own(o, g, r);
+    put(o, ";\n");
 }
 
 /* ---- the web of units (§ 11) ----
@@ -5406,12 +5587,14 @@ static bool movable(const G *g, uint32_t r, const char *b, size_t n)
    initialisation that prints a line (§ 11.2, § 11.5) */
 static void unit_text(G *g, text *u)
 {
+    g->real_names = true;
     for (uint32_t r = 0; r < g->nr; r++) {
         text t = {NULL, 0, 0, 1, 1, 0};
         routine_text(g, &t, r, false);
         g->moved[r] = movable(g, r, t.b, t.n);
         free(t.b);
     }
+    g->real_names = false;
     put(u, "unit Lib;\n\ninterface\n");
     for (uint32_t r = 0; r < g->nr; r++)
         if (g->moved[r])
@@ -7208,6 +7391,8 @@ static bool attempt(uint64_t seed, limba_lxgen *p, bool units)
     g.budget = 30 + (int)below(&g, 60);
     for (uint32_t k = 0, nr = below(&g, 5); k < nr && g.budget > 10; k++)
         routine(&g);
+    shaped_all(&g);
+    overload_twins(&g);
     /* main calls most functions whose result is a record or an array
        first, into a global, and prints it: later a trap may come first */
     uint32_t first[16], nfirst = 0;
