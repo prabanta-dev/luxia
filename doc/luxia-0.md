@@ -1282,7 +1282,10 @@ in Luxia 0.
   decimals (checked).
 - `x:width:decimals` writes a real in fixed notation with `decimals`
   digits after the point, rounded from the exact value of `x` (for a
-  `Float32`, the exact value of the `Float32`).
+  `Float32`, the exact value of the `Float32`). A value whose sign bit is
+  set is written with its minus sign, also when it rounds to zero:
+  `x:0:2` writes `-0.00` when `x` is −0.004 or a negative zero. A NaN
+  is written `nan`, in fixed notation too.
 - A real without a format is written in the **shortest form that reads
   back exactly as a value of its own type**, as Python's `repr`: `0.1`,
   `100.0` (an integral value keeps `.0`), `1e+16`, `1.5e-05`, `-0.0`. For

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The specification (§ 9.1) says the sign of a negative real in fixed
+  notation: `x:0:2` writes `-0.00` for −0.004 and for a negative zero,
+  as the output already did; `tests/run/zero`.
 - Typed constants and variables ready at once are the initial bytes of
   their globals (version 7 of Limba's IR, data and relocations), no
   longer stores at the start of `main`; a String is a relocation to an
