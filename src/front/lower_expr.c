@@ -750,10 +750,76 @@ void lxl_array_parts(lxl *L, uint32_t base, uint32_t at, limba_id *p,
                                               : lxl_addr(L, base);
 }
 
+/* a[i1, ..., in] of an array of more indices: the address of the
+   element, by rows (the last index the fastest); the array first, then
+   each index from the left, checked against the bounds of its own */
+static limba_id multi_addr(lxl *L, uint32_t node)
+{
+    uint32_t *idx = NULL, n = 0, cap = 0, cur = node, root;
+    for (;;) {
+        LIMBA_GROW(idx, n, cap);
+        idx[n++] = nd(L, cur)->b;
+        uint32_t b = nd(L, cur)->a;
+        if (nd(L, b)->kind == LXN_INDEX && nd(L, b)->op == LX_COMMA) {
+            cur = b;
+        } else {
+            root = b;
+            break;
+        }
+    }
+    for (uint32_t i = 0; i < n / 2; i++) {
+        uint32_t t = idx[i];
+        idx[i] = idx[n - 1 - i];
+        idx[n - 1 - i] = t;
+    }
+    limba_ltype dt = ntype(L, root);
+    limba_id p, len, lo, hi;
+    lxl_array_parts(L, root, node, &p, &len, &lo, &hi);
+    const lxl_store *st = nd(L, root)->kind == LXN_REF && L->S->sym[root]
+                              ? &L->store[L->S->sym[root]]
+                              : NULL;
+    limba_id off = LIMBA_NONE;
+    for (uint32_t k = 0; k < n; k++) {
+        const limba_typeinfo *at = ti(L, dt);
+        limba_id i = lxl_value(L, idx[k]);
+        limba_ltype it = ntype(L, idx[k]);
+        lxl_at(L, node);
+        limba_id i64 = lxl_to_i64(L, i, it), pos, dlen;
+        if (at->kind == LIMBA_LTK_OPEN) {
+            limba_id l = k ? st->dims[2 * (k - 1)] : lo;
+            limba_id h = k ? st->dims[2 * (k - 1) + 1] : hi;
+            bool sg = lxl_signed(L, at->index);
+            limba_id a =
+                cmp(L, false, sg ? LIMBA_CC_SGE : LIMBA_CC_UGE, i64, l);
+            limba_id b =
+                cmp(L, false, sg ? LIMBA_CC_SLE : LIMBA_CC_ULE, i64, h);
+            lxl_check(L, bin(L, LIMBA_OP_AND, LIMBA_T_I1, a, b), LXR_INDEX);
+            pos = bin(L, LIMBA_OP_SUB, LIMBA_T_I64, i64, l);
+            dlen = bin(L, LIMBA_OP_ADD, LIMBA_T_I64,
+                       bin(L, LIMBA_OP_SUB, LIMBA_T_I64, h, l),
+                       lxl_iconst(L, LIMBA_T_I64, 1));
+        } else {
+            const limba_typeinfo *ix = ti(L, at->index);
+            check_range(L, i, it, ix->lo, ix->hi, LXR_INDEX);
+            pos = bin(L, LIMBA_OP_SUB, LIMBA_T_I64, i64,
+                      lxl_iconst(L, LIMBA_T_I64, (int64_t)ix->lo));
+            dlen = lxl_iconst(L, LIMBA_T_I64, (int64_t)(ix->hi - ix->lo + 1));
+        }
+        off = k ? bin(L, LIMBA_OP_ADD, LIMBA_T_I64,
+                      bin(L, LIMBA_OP_MUL, LIMBA_T_I64, off, dlen), pos)
+                : pos;
+        dt = ti(L, dt)->elem;
+    }
+    free(idx);
+    return addr(L, p, off, (int64_t)ti(L, dt)->size, 0);
+}
+
 static limba_id index_addr(lxl *L, uint32_t node)
 {
     limba_lx_node *x = nd(L, node);
     uint32_t base = x->a, idx = x->b;
+    if (nd(L, base)->kind == LXN_INDEX && nd(L, base)->op == LX_COMMA)
+        return multi_addr(L, node);
     limba_ltype bt = ntype(L, base);
     if (ti(L, bt)->kind == LIMBA_LTK_POINTER)
         bt = ti(L, bt)->elem;
@@ -1355,8 +1421,12 @@ static void eq_body(lxl *L, limba_ltype t, limba_id fid)
     lxl_end_function(L, 0, false);
 }
 
-/* the comparison function of t, after those of its components */
-static void eq_make(lxl *L, limba_ltype t)
+/* the comparison function of t declared, after those of its components;
+   t then listed, for its body. Every function is declared before the
+   first body is given (limba_luxia.h): a consumer such as luxia knows
+   only those declared then */
+static void eq_declare_all(lxl *L, limba_ltype t, limba_ltype **list,
+                           uint32_t *n, uint32_t *cap)
 {
     if (L->eq_of[t])
         return;
@@ -1365,25 +1435,32 @@ static void eq_make(lxl *L, limba_ltype t)
         for (uint32_t i = 0; i < x->count; i++) {
             limba_ltype ft = L->S->ts.field[x->first + i].type;
             if (is_whole(L, ft))
-                eq_make(L, ft);
+                eq_declare_all(L, ft, list, n, cap);
         }
     } else if (is_whole(L, x->elem)) {
-        eq_make(L, x->elem);
+        eq_declare_all(L, x->elem, list, n, cap);
     }
     limba_id fid = lxl_eq_declare(L, t, eq_ftype(L, t));
     L->eq_of[t] = fid + 1;
-    eq_body(L, t, fid);
+    LIMBA_GROW(*list, *n, *cap);
+    (*list)[(*n)++] = t;
 }
 
 void lxl_eq_functions(lxl *L)
 {
     limba_lxs *S = L->S;
-    for (uint32_t i = 0; i + 1 < S->neqs && !L->stopped; i += 2) {
+    limba_ltype *list = NULL;
+    uint32_t n = 0, cap = 0;
+    for (uint32_t i = 0; i + 1 < S->neqs; i += 2) {
         uint32_t who = S->eqs[i + 1];
         if (!(who & LXS_INIT) && S->reached && !S->reached[who])
             continue;
-        eq_make(L, ntype(L, nd(L, S->eqs[i])->a));
+        eq_declare_all(L, ntype(L, nd(L, S->eqs[i])->a), &list, &n, &cap);
     }
+    /* the bodies, each after those of its components */
+    for (uint32_t i = 0; i < n && !L->stopped; i++)
+        eq_body(L, list[i], L->eq_of[list[i]] - 1);
+    free(list);
 }
 
 /* may evaluating node run code of the program (a call)? */

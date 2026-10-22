@@ -272,6 +272,13 @@ uint32_t limba_lxp_designator(limba_lxp *P)
             limba_lxp_next(P);
             d = lxp_node(P, LXN_INDEX, loc, d, limba_lxp_expr(P, LXP_EXPR), 0,
                          0);
+            /* a[i, j]: the indices of an array of more indices, nested,
+               each but the last marked by op , */
+            while (limba_lxp_accept(P, LX_COMMA)) {
+                P->t->node[d].op = LX_COMMA;
+                d = lxp_node(P, LXN_INDEX, loc, d, limba_lxp_expr(P, LXP_EXPR),
+                             0, 0);
+            }
             limba_lxp_expect(P, LX_RBRACK, "after the index");
             break;
         case LX_CARET:

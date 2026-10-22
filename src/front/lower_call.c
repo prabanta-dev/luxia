@@ -211,6 +211,61 @@ static void open_arg(lxl *L, uint32_t node, uint32_t a, limba_ltype pt,
               LXR_RANGE);
 }
 
+/* the storage of an open parameter named by node a, NULL otherwise */
+static const lxl_store *nd_ref_store(const lxl *L, uint32_t a)
+{
+    const limba_lx_node *x = &L->S->t->node[a];
+    if (x->kind == LXN_REF && L->S->sym[a] &&
+        L->store[L->S->sym[a]].kind == LXL_OPEN)
+        return &L->store[L->S->sym[a]];
+    return NULL;
+}
+
+/* the bounds of index d (from 0) of array node a, given to an open
+   parameter of type pt with more indices: i64 values, checked against the
+   index of the parameter when it is a range */
+static void more_bounds(lxl *L, uint32_t node, uint32_t a, limba_ltype pt,
+                        limba_id *out)
+{
+    limba_ltype t = L->S->type[a];
+    const lxl_store *st = nd_ref_store(L, a);
+    uint32_t n = lxl_dims(L, pt);
+    limba_ltype at = t, ptd = pt;
+    for (uint32_t d = 1; d < n; d++) {
+        at = ti(L, at)->elem;
+        ptd = ti(L, ptd)->elem;
+        limba_id lo, hi;
+        if (ti(L, at)->kind == LIMBA_LTK_OPEN) {
+            lo = st->dims[2 * (d - 1)];
+            hi = st->dims[2 * (d - 1) + 1];
+        } else {
+            const limba_typeinfo *ix = ti(L, ti(L, at)->index);
+            lo = lxl_iconst(L, LIMBA_T_I64, (int64_t)ix->lo);
+            hi = lxl_iconst(L, LIMBA_T_I64, (int64_t)(uint64_t)ix->hi);
+        }
+        out[2 * (d - 1)] = lo;
+        out[2 * (d - 1) + 1] = hi;
+        if (ti(L, at)->kind != LIMBA_LTK_OPEN)
+            continue; /* bounds known: checked by sema */
+        limba_ltype pix = ti(L, ptd)->index;
+        const limba_typeinfo *pi = ti(L, pix);
+        if (!(pi->flags & LIMBA_TF_RANGE))
+            continue;
+        bool sg = lxl_signed(L, pix);
+        limba_id empty = icmp(L, sg ? LIMBA_CC_SGT : LIMBA_CC_UGT, lo, hi);
+        limba_id in_lo = icmp(L, sg ? LIMBA_CC_SGE : LIMBA_CC_UGE, lo,
+                              lxl_iconst(L, LIMBA_T_I64, (int64_t)pi->lo));
+        limba_id in_hi =
+            icmp(L, sg ? LIMBA_CC_SLE : LIMBA_CC_ULE, hi,
+                 lxl_iconst(L, LIMBA_T_I64, (int64_t)(uint64_t)pi->hi));
+        lxl_at(L, node);
+        lxl_check(L,
+                  bin(L, LIMBA_OP_OR, LIMBA_T_I1, empty,
+                      bin(L, LIMBA_OP_AND, LIMBA_T_I1, in_lo, in_hi)),
+                  LXR_RANGE);
+    }
+}
+
 static void routine(lxl *L, uint32_t node, limba_sym s, limba_id *result)
 {
     limba_lxs *S = L->S;
@@ -235,7 +290,7 @@ static void routine(lxl *L, uint32_t node, limba_sym s, limba_id *result)
     /* the operands of each parameter (up to 3: an open array), made in
        the order the arguments are written, then the default values
        (constants), and given in the order of the parameters */
-    limba_id(*pv)[3] = limba_xcalloc(count + 1, sizeof(*pv));
+    limba_id(*pv)[1 + 2 * LXL_MAXDIMS] = limba_xcalloc(count + 1, sizeof(*pv));
     uint32_t *pk = limba_xcalloc(count + 1, sizeof(*pk));
     uint32_t written = nargs(L, node);
     for (uint32_t w = 0; w <= written; w++) {
@@ -261,7 +316,9 @@ static void routine(lxl *L, uint32_t node, limba_sym s, limba_id *result)
             bool by_addr = true;
             if (ti(L, p.type)->kind == LIMBA_LTK_OPEN) {
                 open_arg(L, node, a, p.type, &v[0], &v[1], &v[2]);
-                k = ext ? 1 : 3;
+                k = ext ? 1 : 1 + 2 * lxl_dims(L, p.type);
+                if (!ext && k > 3)
+                    more_bounds(L, node, a, p.type, &v[3]);
             } else if (p.mode != LXS_IN || !lxl_scalar(L, p.type)) {
                 v[0] = lxl_addr(L, a);
             } else {
@@ -456,6 +513,19 @@ static void builtin(lxl *L, uint32_t node, unsigned id, limba_id *result)
         if (x->kind == LIMBA_LTK_POINTER)
             x = ti(L, x->elem);
         lxl_array_parts(L, a0, node, &p, &len, &lo, &hi);
+        if (nargs(L, node) == 2) {
+            /* low(a, k) of an open array of more indices (a static one is
+               a constant): the bounds of index k */
+            __int128 k = 1;
+            lxs_value_to_int(S, S->val[arg(L, node, 1)], &k);
+            const lxl_store *st = nd_ref_store(L, a0);
+            if (k > 1 && st && st->dims) {
+                lo = st->dims[2 * (k - 2)];
+                hi = st->dims[2 * (k - 2) + 1];
+            }
+            for (__int128 i = 1; i < k; i++)
+                x = ti(L, x->elem);
+        }
         if (x->kind == LIMBA_LTK_OPEN) {
             /* the bounds of the argument, i64 values */
             *result = id == LXB_LOW ? from_i64(L, lo, rt)

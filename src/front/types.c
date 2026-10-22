@@ -312,14 +312,19 @@ static size_t show(const limba_types *ts, limba_ltype id, limba_name_fn name,
     case LIMBA_LTK_NIL:
         return put(buf, size, len, "nil", 3);
     case LIMBA_LTK_ARRAY:
-        len = put(buf, size, len, "array[", 6);
-        len = show(ts, t->index, name, ctx, buf, size, len, depth + 1);
-        len = put(buf, size, len, "] of ", 5);
-        return show(ts, t->elem, name, ctx, buf, size, len, depth + 1);
     case LIMBA_LTK_OPEN:
+        /* the indices of an array of more indices together */
         len = put(buf, size, len, "array[", 6);
-        len = show(ts, t->index, name, ctx, buf, size, len, depth + 1);
-        len = put(buf, size, len, " range <>] of ", 14);
+        for (;;) {
+            len = show(ts, t->index, name, ctx, buf, size, len, depth + 1);
+            if (t->kind == LIMBA_LTK_OPEN)
+                len = put(buf, size, len, " range <>", 9);
+            if (!(t->flags & LIMBA_TF_MULTI))
+                break;
+            len = put(buf, size, len, ", ", 2);
+            t = &ts->t[t->elem];
+        }
+        len = put(buf, size, len, "] of ", 5);
         return show(ts, t->elem, name, ctx, buf, size, len, depth + 1);
     case LIMBA_LTK_POINTER:
         len = put(buf, size, len, "^", 1);

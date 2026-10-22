@@ -1157,10 +1157,12 @@ prog.luxia:2:11: error[L0056]: the out parameter 'r' may leave without a value
 
 ### L0054 — UNSUPPORTED
 
-A valid program that this version of `luxia` cannot translate yet. Two
-cases exist: a `case` label that is a range of more than 4096 values, and
-a value too large for the stack ("a value too large for the stack is not
-translated yet"). These are limits of the compiler, not rules of the
+A valid program that this version of `luxia` cannot translate yet: a
+`case` label that is a range of more than 4096 values; a value too large
+for the stack ("a value too large for the stack is not translated yet");
+an array of more indices (§ 3.7.2) with computed bounds or made by `new`,
+an open one compared as a whole or given an aggregate, or one of more
+than 8 open indices. These are limits of the compiler, not rules of the
 language.
 
 ```pascal
@@ -1863,6 +1865,27 @@ end.
 prog.luxia:2:31: error[L0091]: a default value is only for a parameter without a mode: a var or out one always has an argument
 ```
 
+### L0092 — INDICES OF AN ARRAY OF MORE
+
+An array of more indices takes all its indices in one pair of brackets,
+`a[i, j]`, and an array of arrays one per pair, `a[i][j]`; the indices
+of a type are all open or none; `low(a, k)`, `high(a, k)` and
+`length(a, k)` take an array of more indices and a constant `k` from 1
+to the number of its indices (§ 3.7.2).
+
+```pascal
+program p;
+type Grid = array[Int32 range 1..2, Int32 range 1..3] of Int32;
+var g: Grid;
+begin
+  writeln(g[1]);
+end.
+```
+
+```
+prog.luxia:5:12: error[L0092]: Grid takes all its indices in one [ ]: a[i, j]
+```
+
 ## All the codes
 
 | Code | Name | Meaning |
@@ -1958,3 +1981,4 @@ prog.luxia:2:31: error[L0091]: a default value is only for a parameter without a
 | L0089 | ARG_MISSING | a parameter without a default value given no argument |
 | L0090 | NAMED_PLACE | an argument by name to a routine of the language or a conversion |
 | L0091 | DEFAULT_PLACE | a default value on a `var`, `out` or open array parameter, or not last |
+| L0092 | MULTI_INDEX | an array of more indices indexed in part, or `a[i][j]`; `a[i, j]` of an array of arrays; indices open and not open mixed; `low(a, k)` past its indices |

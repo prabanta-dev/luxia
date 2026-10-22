@@ -356,6 +356,12 @@ static const parse_case program_cases[] = {
      "(program p [(routine procedure q [(param [a] (tname int32 - -) 1)] - "
      "(body [] []))] [(callst (call q [(named a 2)]))])",
      ""},
+    /* an array of two indices, an element: nested, the outer marked , */
+    {"program p; var m: array[Int32 range 1..2, Int32 range 1..2] of Int32; "
+     "begin m[1, 2] := 3; end.",
+     "(program p [(var [m] (tarray , (tname int32 1 2) (tarray (tname int32 1 "
+     "2) (tname int32 - -))) -)] [(assign (index (index , m 1) 2) 3)])",
+     ""},
 };
 
 static void parse_string(const char *src, bool whole, char **tree,
@@ -422,411 +428,465 @@ typedef struct {
     const char *errors;
 } sema_case;
 
-static const sema_case sema_cases[] = {
-    /* a program that uses most of Luxia 0 */
-    {"program P;\n"
-     "const\n"
-     "  N = 10;\n"
-     "  Half = N div 2;\n"
-     "  Pi: Float64 = 3.141592653589793;\n"
-     "  Exact: Boolean = 0.1 + 0.2 = 0.3;\n"
-     "type\n"
-     "  Colore = (Rosso, Verde, Blu);\n"
-     "  Indice = Int32 range 1..N;\n"
-     "  Vettore = array[Indice] of Float64;\n"
-     "  PNodo = ^Nodo;\n"
-     "  Nodo = record\n"
-     "    valore: Int64;\n"
-     "    next: PNodo;\n"
-     "  end;\n"
-     "  Metri = new Float64;\n"
-     "var\n"
-     "  v: Vettore;\n"
-     "  c: Colore := Verde;\n"
-     "  m: Metri;\n"
-     "  p: PNodo := nil;\n"
-     "  s: String := \"ciao\" & ' ' & \"mondo\";\n"
-     "  b: Bits32 := 0xFF;\n"
-     "function Somma(a: array[Int32 range <>] of Float64): Float64;\n"
-     "var t: Float64 := 0.0;\n"
-     "begin\n"
-     "  for var i := low(a) to high(a) do\n"
-     "    t := t + a[i];\n"
-     "  end;\n"
-     "  return t;\n"
-     "end Somma;\n"
-     "procedure Riempi(var a: Vettore; out n: Int32);\n"
-     "begin\n"
-     "  for var i: Int32 := 1 to 10 do\n"
-     "    a[i] := Float64(i) * 0.5;\n"
-     "  end;\n"
-     "  n := 10;\n"
-     "end;\n"
-     "begin\n"
-     "  var n: Int32;\n"
-     "  Riempi(v, n);\n"
-     "  writeln(\"somma = \", Somma(v):0:3, \" n = \", n, Half);\n"
-     "  m := Metri(2.5);\n"
-     "  p := new(Nodo);\n"
-     "  p.valore := 42;\n"
-     "  p.next := nil;\n"
-     "  case c of\n"
-     "    when Rosso: writeln(\"r\");\n"
-     "    when Verde, Blu: writeln(\"vb\");\n"
-     "  end;\n"
-     "  b := (b shl 4) xor Bits32(0x0F);\n"
-     "  if s[1] = 99 and n in 1..10 and c in Colore then\n"
-     "    dispose(p);\n"
-     "  end;\n"
-     "  while n > 0 do\n"
-     "    n := n - 1;\n"
-     "    exit when n = 5;\n"
-     "  end;\n"
-     "  var k: Int32 := 3;\n"
-     "  var a: array[Int32 range 1..k] of Byte;\n"
-     "  a[1] := 2;\n"
-     "  const Z = Pi * 2.0;\n"
-     "  writeln(sqrt(m / Metri(2.0)) > Metri(Z));\n"
-     "end P.",
-     ""},
-    /* names */
-    {"program p; begin x := 1; end.", "L0021@1:18"},
-    {"program p; var Conto: Int32 := 0; begin conto := 1; end.", "L0022@1:41"},
-    {"program p; var a: Int32; a: Int64; begin end.", "L0023@1:26 L0000@1:16"},
-    {"program p; var writeln: Int32; begin end.", "L0023@1:16"},
-    {"program p; const A = B; const B = 1; begin end.",
-     "L0024@1:22 L0000@1:31"},
-    {"program p; type T = S; S = T; begin end.", "L0047@1:17"},
-    {"program p; type R = record x: R; end; begin end.", "L0047@1:31"},
-    /* types of operands */
-    {"program p; var a: Int32; b: Int64; begin a := b; end.", "L0027@1:47"},
-    {"program p; var a: Int32; b: Int64; begin a := a + b; end.", "L0027@1:49"},
-    {"program p; var a: Int8 := 300; begin end.", "L0029@1:27"},
-    {"program p; const A: Int8 = 100 + 100; begin end.", "L0029@1:32"},
-    {"program p; begin var x := 0; end.", "L0033@1:27"},
-    {"program p; var u: UInt32 := 1; begin u := -u; end.", "L0028@1:43"},
-    {"program p; var a: Int32 := 7 / 2; begin end.", "L0028@1:30"},
-    {"program p; var a: UInt32 := 1; begin a := a shl 2; end.", "L0028@1:45"},
-    {"program p; var f: Float32 := 16777217; begin end.", "L0029@1:30"},
-    {"program p; const Z: Float32 = 1e39; begin end.", "L0029@1:31"},
-    {"program p; const D = 1 div 0; begin end.", "L0032@1:24"},
-    {"program p; begin if 1 then end; end.", "L0027@1:21"},
-    {"program p; var s: String := String(1); begin end.", "L0039@1:29"},
-    /* variables, constants, calls */
-    {"program p; const C = 1; begin C := 2; end.", "L0034@1:31"},
-    {"program p; begin for var i: Int32 := 1 to 2 do i := 3; end; end.",
-     "L0034@1:48"},
-    {"program p; procedure q(a: Int32); begin a := 1; end; begin end.",
-     "L0034@1:41"},
-    {"program p; var s: String := \"a\"; begin s[1] := 65; end.", "L0034@1:41"},
-    {"program p; var a: Int32; const B = a; begin end.", "L0030@1:36"},
-    {"program p; procedure q(a: Int32); begin end; begin q(); end.",
-     "L0035@1:52"},
-    {"program p; function f(): Int32; begin return 1; end; begin f(); end.",
-     "L0037@1:60"},
-    {"program p; procedure q(); begin end; var x: Int32 := q(); begin end.",
-     "L0038@1:54"},
-    {"program p; var s: String := str(1:2); begin end.", "L0048@1:33"},
-    {"program p; var a: array[Int32 range <>] of Int32; begin end.",
-     "L0049@1:19"},
-    {"program p; var n: Int32 := 3; var a: array[Int32 range 1..n] of Int32;"
-     " begin end.",
-     "L0051@1:44"},
-    /* the pragmas and the names of the checks (§ 9) */
-    {"program p; pragma sopress(range_check); begin end.", "L0057@1:19"},
-    {"program p; pragma suppress(range_chek, index_check); begin end.",
-     "L0058@1:28"},
-    /* an object reached through a pointer is no var argument, nor an
-       out record or array (§ 3.10) */
-    {"program p; type R = record a: Int32; s: String; end; var q: ^R; "
-     "procedure f(var x: Int32); begin x := 1; end f; begin q := new(R); "
-     "f(q.a); end.",
-     "L0059@1:135"},
-    {"program p; type R = record a: Int32; end; var q: ^R; procedure g(var "
-     "v: R); begin v.a := 1; end g; begin q := new(R); g(q^); end.",
-     "L0059@1:122"},
-    {"program p; type R = record a: Int32; end; var q: ^R; procedure h(out "
-     "v: R); begin v.a := 1; end h; begin q := new(R); h(q^); end.",
-     "L0059@1:122"},
-    /* records name every field, in order; once each; arrays positional or by
-       index, complete (§ 6.8) */
-    {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var v: V3 := {y: 1.0; x: 2.0; z: 0.0}; begin end.",
-     "L0085@1:145"},
-    {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var v: V3 := {x: 1.0; z: 2.0}; begin end.",
-     "L0081@1:136"},
-    {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var v: V3 := {x: 1.0, y: 2.0, z: 3.0}; begin end.",
-     "L0083@1:136"},
-    {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var v: V3 := {1.0; 2.0; 3.0}; begin end.",
-     "L0083@1:137"},
-    {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var v: V3 := {x: 1.0; x: 2.0; y: 0.0; z: 0.0}; begin end.",
-     "L0082@1:145"},
-    {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var v: V3 := {x: 1.0; y: 2.0; w: 3.0; z: 0.0}; begin end.",
-     "L0040@1:153"},
-    {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var r: Row := {1.0, 2.0, 3.0}; begin end.",
-     "L0084@1:137"},
-    {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var r: Row := {1.0, 2.0, 3.0, 4.0, 5.0}; begin end.",
-     "L0084@1:137"},
-    {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var r: Row := {1.0, 2.0, 3.0, 4.0, else 0.0}; begin end.",
-     "L0083@1:158"},
-    {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var r: Row := {1: 1.0, 2: 2.0, 4: 4.0}; begin end.",
-     "L0081@1:137"},
-    {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var r: Row := {1: 1.0, 1: 2.0, else 0.0}; begin end.",
-     "L0082@1:146"},
-    {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var n: Int32 := 1; r: Row := {n: 1.0, else 0.0}; begin end.",
-     "L0030@1:153"},
-    {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var r: Row := {1, 2: 1.0, else 0.0}; begin end.",
-     "L0083@1:141"},
-    {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var r: Row := {else 0.0, 1: 1.0}; begin end.",
-     "L0083@1:138"},
-    {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var r: Row := {5: 1.0, else 0.0}; begin end.",
-     "L0029@1:138"},
-    {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var c: Int32 := {1}; begin end.",
-     "L0083@1:139"},
-    {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var g: array[Colour] of Int32 := {Red: 1; Green: 2; Blue: 3}; begin end.",
-     "L0083@1:156"},
-    {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; const O: V3 = {x: 0.0; y: 0.0; z: 0.0}; C: array[Int32 range 1..2] of V3 = {O, O}; begin end.",
-     "L0030@1:198"},
-    {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var n: Float64 := 1.0; const O: V3 = {x: n; y: 0.0; z: 0.0}; begin end.",
-     "L0030@1:160"},
-    {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; const O: V3 = {x: 0.0; y: 0.0; z: 0.0}; procedure P(); begin O.x := 1.0; end; begin end.", "L0034@1:184"},
-    /* a comparison as an element goes in parentheses (§ 6.8) */
-    {"program p; var c: array[Int32 range 1..2] of Boolean := {1 < 2, true}; begin end.",
-     "L0010@1:60"},
-    /* an aggregate for an open array: from 0 if the index has it, no
-       further than its last value (§ 6.8) */
-    {"program p; procedure P(w: array[Int8 range <>] of Int32); begin end P; begin P({0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}); end.",
-     "L0084@1:80"},
-    /* records and arrays compared whole: the same type, an open operand
-       with what could be passed to it, an aggregate typed by the other
-       operand; no order (§ 6.2) */
-    {"program p; type Va = record x: Int32; end; Wa = record x: Int32; end; var v: Va; w: Wa; begin if v = w then end; end.",
-     "L0027@1:100"},
-    {"program p; type Va = record x: Int32; end; var v: Va; begin if v < v then end; end.",
-     "L0028@1:66"},
-    {"program p; type Va = record x: Int32; end; begin if {x: 1} = {x: 1} then end; end.",
-     "L0033@1:53 L0033@1:62"},
-    {"program p; procedure P(s: array[Int32 range <>] of Int32; u: array[Int32 range <>] of Int64); begin if s = u then end; end P; begin end.",
-     "L0027@1:106"},
-    {"program p; procedure P(s: array[Int32 range <>] of Int32; t: array[Int64 range <>] of Int32); begin if s = t then end; end P; begin end.",
-     "L0027@1:106"},
-    {"program p; type Va = record x: Int32; end; var v: Va; begin if v = 1 then end; end.",
-     "L0027@1:66"},
-    {"program p; var i: Int32; s: String; begin if i = s then end; end.",
-     "L0027@1:48"},
-    {"program p; procedure P(n: Int32); var a: array[Int32 range 1..n] of Int32; var b: array[Int32 range 1..n] of Int32; begin if a = b then end; end P; begin end.",
-     "L0027@1:128"},
-    {"program p; var a: array[Int32 range 1..2] of Int32; b: array[Int32 range 1..2] of Int32; begin if a = b then end; end.",
-     "L0027@1:101"},
-    {"program p; var i: Int32; begin if i = {1} then end; end.", "L0083@1:39"},
-    {"program p; procedure P(s: array[Int32 range <>] of Int32); begin if s = {1, else 0} then end; end P; begin end.",
-     "L0083@1:77"},
-    /* p^.x and p^[i]: one form, p.x and p[i] (§ 3.10) */
-    {"program p; type R = record a: Int32; end; var q: ^R; begin q := "
-     "new(R); q^.a := 1; end.",
-     "L0063@1:75"},
-    {"program p; type A = array[Int32 range <>] of Int32; begin var q := "
-     "new(A range 1..3); q^[1] := 1; end.",
-     "L0063@1:89"},
-    /* arrays made by new (§ 3.10, § 9.7) and move (§ 9.5) */
-    {"program p; type R = record x: Int32; end; procedure s(r: R); begin "
-     "end s; begin var q := new(R); s(q^); end.",
-     "L0059@1:101"},
-    {"program p; type A = array[Int32 range <>] of Int32; begin var p := "
-     "new(A range 1..3); var q := new(A range 1..3); p^ := q^; end.",
-     "L0049@1:116 L0049@1:122"},
-    {"program p; type A = array[Int32 range <>] of Int32; begin var p := "
-     "new(A); end.",
-     "L0049@1:68"},
-    {"program p; type A = array[Int32 range <>] of Int32; B = "
-     "array[Int32 range <>] of Int64; begin var p := new(A range 1..3); "
-     "var q := new(B range 1..3); move(p^, 1, q^, 1, 3); end.",
-     "L0027@1:164"},
-    {"program p; type A = array[Int32 range <>] of Int32; procedure f(a: "
-     "A); begin move(a, low(a), a, low(a), 0); end f; begin end.",
-     "L0034@1:94"},
-    /* translate, reverse, occurrences (§ 9.5): a String is not written,
-       the table is indexed by Byte and holds Bytes, the elements are
-       Bytes, reverse takes an array, written, the pattern holds Bytes,
-       the names are the language's */
-    {"program p; type T = array[Byte] of Byte; var tb: T; s: String; begin translate(s, 1, 1, tb); end.",
-     "L0027@1:80"},
-    {"program p; type T = array[Byte] of Byte; var tb: T; u: array[Int32 range 0..255] of Byte; a: array[Int32 range 1..3] of Byte; begin translate(a, 1, 3, u); end.",
-     "L0027@1:152"},
-    {"program p; type T = array[Byte] of Byte; var tb: T; type S = Byte range 0..9; var a: array[Int32 range 1..3] of S; begin translate(a, 1, 3, tb); end.",
-     "L0027@1:132"},
-    {"program p; type T = array[Byte] of Byte; var tb: T; n: Int64; begin reverse(n, 1, 1); end.",
-     "L0027@1:77"},
-    {"program p; type A = array[Int32 range <>] of Int32; procedure f(a: "
-     "A); begin reverse(a, low(a), 0); end f; begin end.",
-     "L0034@1:86"},
-    {"program p; var a: array[Int32 range 1..3] of Byte; q: array[Int32 "
-     "range 1..3] of Int32; n: Int64; begin n := occurrences(a, 1, 3, q); "
-     "end.",
-     "L0027@1:131"},
-    {"program p; var reverse: Int32; begin end.", "L0023@1:16"},
-    {"program p; type T = array[Byte] of Byte; var q: ^T; n: Int64; a: "
-     "array[Int8 range -2..2] of Byte; m: Int64; begin q := new(T); "
-     "translate(a, -2, 5, q^); n := occurrences(\"abab\", 1, 4, \"ab\"); m "
-     ":= occurrences(a, -2, 5, a); end.",
-     ""},
-    /* readbytes and writebytes (§ 9.1, § 9.2): an array of Bytes read
-       into, written; a String only written; the result used; 141 is the
-       status of a closed output */
-    {"program p; var a: array[Int32 range 1..3] of Byte; n: Int64; s: String; begin n := readbytes(s, 1, 1); end.",
-     "L0027@1:94"},
-    {"program p; var a: array[Int32 range 1..3] of Int32; begin writebytes(a, 1, 3); end.",
-     "L0027@1:70"},
-    {"program p; type S = Byte range 0..9; var a: array[Int32 range 1..3] of S; n: Int64; begin n := readbytes(a, 1, 3); end.",
-     "L0027@1:106"},
-    {"program p; type A = array[Int32 range <>] of Byte; procedure f(a: A); var n: Int64; begin n := readbytes(a, low(a), 0); end f; begin end.",
-     "L0034@1:106"},
-    {"program p; var a: array[Int32 range 1..3] of Byte; n: Int64; s: String; begin readbytes(a, 1, 3); end.",
-     "L0037@1:79"},
-    {"program p; var writebytes: Int32; begin end.", "L0023@1:16"},
-    {"program p; type Bs = array[Int32 range <>] of Byte; var q: ^Bs; n: Int64; m: Int64; begin q := new(Bs range 1..4); m := readbytes(q^, 1, 4); writebytes(q^, 1, m); writebytes(\"abc\", 2, 2); n := 1; end.",
-     ""},
-    {"program p; begin halt(141); end.", "L0055@1:23"},
-    {"program p; type R = record s: String; end; var q: ^R; b: Boolean; "
-     "begin q := new(R); b := readline(q.s); end.",
-     "L0059@1:101"},
-    {"program p; type R = record a: Int32; end; var q: ^R; b: Boolean; "
-     "begin q := new(R); b := val(\"1\", q.a); end.",
-     "L0059@1:100"},
-    /* statements */
-    {"program p; type Col = (A, B, D); var c: Col; begin case c of when A: "
-     "c := B; end; end.",
-     "L0044@1:52"},
-    {"program p; var c: Int32; begin case c of when 1..5: c := 1; when 3: "
-     "c := 2; else c := 3; end; end.",
-     "L0043@1:66"},
-    {"program p; begin exit; end.", "L0045@1:18"},
-    {"program p; procedure q(); begin return 1; end; begin end.", "L0046@1:33"},
-    {"program p; function f(): Int32; begin return; end; begin end.",
-     "L0046@1:39"},
-    /* 1 is the exit status of the errors at run time */
-    {"program p; begin halt(1); end.", "L0055@1:23"},
-    {"program p; begin halt(256); end.", "L0055@1:23"},
-    /* a width from 0, decimals from 0 to 100, arguments from 1 */
-    {"program p; var x: Int32 := 1; begin writeln(x:-1); end.", "L0029@1:47"},
-    {"program p; var r: Float64 := 1.0; begin writeln(r:5:101); end.",
-     "L0029@1:53"},
-    {"program p; begin writeln(arg(0)); end.", "L0029@1:30"},
-    /* the name after end is written as declared (§ 2.2) */
-    {"program p; procedure Show(); begin end show; begin end p.", "L0022@1:40"},
-    {"program p; begin end P.", "L0022@1:22"},
-    /* a file that is not UTF-8: one error, no echo from the parser */
-    {"program p; \xff begin end.", "L0001@1:12"},
-    /* ord of a character, a Boolean or an enumeration only; low and high
-       of a discrete type */
-    {"program p; var x: Int32 := 1; begin writeln(ord(x)); end.", "L0027@1:49"},
-    {"program p; begin writeln(low(Float64)); end.", "L0027@1:30"},
-    /* open arrays: index of the same base, same elements, bounds inside a
-       range, only for parameters */
-    {"program p; var b: array[Int16 range 1..2] of Int8; procedure Q(v: "
-     "array[Int32 range <>] of Int8); begin end Q; begin Q(b); end.",
-     "L0027@1:120"},
-    {"program p; type S = Int32 range 1..10; var a: array[Int32 range 0..20] "
-     "of Int8; procedure P(v: array[S range <>] of Int8); begin end P; begin "
-     "P(a); end.",
-     "L0029@1:145"},
-    {"program p; var y: Int32 range <>; begin end.", "L0049@1:19"},
-    {"program p; type V = array[Int8 range <>] of Int8; function F(): V; "
-     "begin end F; begin end.",
-     "L0049@1:65"},
-    /* the boundary with C (§ 3.13, § 8.5, § 10.4): what does not cross,
-       the pragmas written wrong, the restriction, the opaque pointer */
-    {"program p; procedure P(s: String); external \"c\"; begin end.",
-     "L0060@1:27"},
-    {"program p; function F(): Boolean; external \"c\"; begin end.",
-     "L0060@1:26"},
-    {"program p; type R = record a: CInt; end; procedure P(r: R); external \"c\"; begin end.",
-     "L0060@1:57"},
-    {"program p; type R = record a: CInt; end; pragma convention(c, R); type Q = ^R; procedure P(q: Q); external \"c\"; begin end.",
-     "L0060@1:95"},
-    {"program p; type S = Int32 range 1..9; procedure P(s: S); external \"c\"; begin end.",
-     "L0060@1:54"},
-    {"program p; type R = record a: String; end; pragma convention(c, R); begin end.",
-     "L0060@1:65"},
-    {"program p; type R = record a: CInt; end; pragma convention(ada, R); begin end.",
-     "L0062@1:42"},
-    {"program p; type R = record a: CInt; end; pragma convention(c, Int32); begin end.",
-     "L0062@1:63"},
-    {"program p; pragma restrictions(no_heap); begin end.", "L0062@1:12"},
-    {"program p; pragma restrictions(no_external); procedure P(); external \"c\"; begin end.",
-     "L0061@1:56"},
-    {"program p; pragma restrictions(no_external); var s: CString; begin end.",
-     "L0061@1:53"},
-    {"program p; type R = record a: CInt; end; begin pragma convention(c, R); end.",
-     "L0062@1:55"},
-    {"program p; var q: CPointer; begin q := q + 1; end.", "L0027@1:44"},
-    {"program p; var q: CPointer; i: Int64; begin i := Int64(q); end.",
-     "L0039@1:50"},
-    {"program p; type TA = new CPointer; TB = new CPointer; var x: TA; y: TB; begin x := y; end.",
-     "L0027@1:84"},
-    {"program p; var c: CInt; i: Int32 := 1; begin c := i; end.", "L0027@1:51"},
-    {"program p; var s: String; begin writeln(cvalue(s)); end.", "L0027@1:48"},
-    {"program p; procedure P(); external name \"x\"; begin end.", "L0010@1:36"},
-    {"program p; var q: CPointer; begin writeln(q^); end.", "L0042@1:44"},
-    /* BigInt: not discrete, not bits, no range, no mixing, no
-    real constant, the limit of the constants */
-    {"program p; type R = BigInt range 1..10; begin end.", "L0050@1:21"},
-    {"program p; var a: array[BigInt] of Int32; begin end.", "L0027@1:25"},
-    {"program p; var b: BigInt := 2; i: Int32 := 2; begin i := i ** b; end.",
-     "L0028@1:63"},
-    {"program p; var b: BigInt := 2; begin b := b shl 1; end.", "L0028@1:45"},
-    {"program p; var b: BigInt := 65; begin writeln(chr(b)); end.",
-     "L0027@1:51"},
-    {"program p; var b: BigInt := 2; i: Int64 := 2; begin b := b + i; end.",
-     "L0027@1:60"},
-    {"program p; var b: BigInt := 1.5; begin end.", "L0027@1:29"},
-    {"program p; const C: BigInt = 2 ** 20000; begin end.", "L0031@1:32"},
-    {"program p; var b: BigInt := 2; begin case b of when 1: writeln(1); else writeln(2); end; end.",
-     "L0027@1:43"},
-    {"program p; var b: BigInt := 2; begin b := succ(b); end.", "L0027@1:48"},
-    {"program p; var b: BigInt := 2; begin for var i: BigInt := 1 to b do end; end.",
-     "L0027@1:59"},
-    {"program p; var b: BigInt := 2; begin b := b and b; end.", "L0028@1:45"},
-    {"program p; var b: BigInt := 2; begin writeln(b / b); end.", "L0028@1:48"},
-    {"program p; var b: BigInt := 2; begin writeln(low(BigInt)); end.",
-     "L0027@1:50"}, /* arguments by name and default values (Luxia 1, step 1) */
-    {"program p; procedure q(a: Int32; b: Int32 := 0); begin end; begin q(1); q(1, 2); q(a => 1); q(b => 2, a => 1); q(1, b => 2); end.",
-     ""},
-    {"program p; procedure q(a: Int32; b: Int32 := 0); begin end; begin q(b => 1, 2); end.",
-     "L0086@1:77 L0089@1:67"},
-    {"program p; procedure q(a: Int32; b: Int32 := 0); begin end; begin q(c => 1); end.",
-     "L0087@1:69 L0089@1:67"},
-    {"program p; procedure q(a: Int32; b: Int32 := 0); begin end; begin q(1, a => 2); end.",
-     "L0088@1:72"},
-    {"program p; procedure q(a: Int32; b: Int32 := 0); begin end; begin q(b => 2); end.",
-     "L0089@1:67"},
-    {"program p; procedure q(a: Int32; b: Int32 := 0); begin end; begin q(A => 2); end.",
-     "L0022@1:69"},
-    {"program p; procedure q(a: Int32; b: Int32 := 0); begin end; begin q(1 + 1 => 2); end.",
-     "L0087@1:71 L0089@1:67"},
-    {"program p; begin writeln(x => 1); end.", "L0090@1:26"},
-    {"program p; var x: Int32; begin x := Int32(v => 1); end.", "L0090@1:43"},
-    {"program p; procedure q(a: Int32; b: Int32 := 0); begin end; begin q(); q(1, 2, 3); end.",
-     "L0035@1:67 L0035@1:72"},
-    {"program p; procedure q(var a: Int32 := 1); begin end; begin end.",
-     "L0091@1:40"},
-    {"program p; procedure q(out a: Int32 := 1); begin a := 2; end; begin end.",
-     "L0091@1:40"},
-    {"program p; procedure q(a: Int32 := 1; b: Int32); begin end; begin end.",
-     "L0091@1:39"},
-    {"program p; procedure q(a: array[Int32 range <>] of Int32 := {1}); begin end; begin end.",
-     "L0091@1:61"},
-    {"program p; var n: Int32 := 3; procedure q(a: Int32 := n); begin end; begin end.",
-     "L0030@1:55"},
-    {"program p; procedure q(a: UInt8 := 300); begin end; begin end.",
-     "L0029@1:36"},
-    {"program p; procedure q(a: Int32 := \"x\"); begin end; begin end.",
-     "L0027@1:36"},
-    {"program p; type R = record x: Int32; end; var v: R; procedure q(a: R := v); begin end; begin end.",
-     "L0030@1:73"},
-    {"program p; type R = record x: Int32; end; const K: R = {x: 1}; procedure q(a: R := K; b: R := {x: 2}; c: String := \"s\"; d: BigInt := 7; e: ^R := nil); begin end; begin q(); end.",
-     ""},
-    {"program p; function f(a: Int32; b: Int32 := 1): Int32; begin return a + b; end; var x: Int32; begin x := f(b => 2); end.",
-     "L0089@1:106"},
+static const sema_case sema_cases[] =
+    {
+        /* a program that uses most of Luxia 0 */
+        {"program P;\n"
+         "const\n"
+         "  N = 10;\n"
+         "  Half = N div 2;\n"
+         "  Pi: Float64 = 3.141592653589793;\n"
+         "  Exact: Boolean = 0.1 + 0.2 = 0.3;\n"
+         "type\n"
+         "  Colore = (Rosso, Verde, Blu);\n"
+         "  Indice = Int32 range 1..N;\n"
+         "  Vettore = array[Indice] of Float64;\n"
+         "  PNodo = ^Nodo;\n"
+         "  Nodo = record\n"
+         "    valore: Int64;\n"
+         "    next: PNodo;\n"
+         "  end;\n"
+         "  Metri = new Float64;\n"
+         "var\n"
+         "  v: Vettore;\n"
+         "  c: Colore := Verde;\n"
+         "  m: Metri;\n"
+         "  p: PNodo := nil;\n"
+         "  s: String := \"ciao\" & ' ' & \"mondo\";\n"
+         "  b: Bits32 := 0xFF;\n"
+         "function Somma(a: array[Int32 range <>] of Float64): Float64;\n"
+         "var t: Float64 := 0.0;\n"
+         "begin\n"
+         "  for var i := low(a) to high(a) do\n"
+         "    t := t + a[i];\n"
+         "  end;\n"
+         "  return t;\n"
+         "end Somma;\n"
+         "procedure Riempi(var a: Vettore; out n: Int32);\n"
+         "begin\n"
+         "  for var i: Int32 := 1 to 10 do\n"
+         "    a[i] := Float64(i) * 0.5;\n"
+         "  end;\n"
+         "  n := 10;\n"
+         "end;\n"
+         "begin\n"
+         "  var n: Int32;\n"
+         "  Riempi(v, n);\n"
+         "  writeln(\"somma = \", Somma(v):0:3, \" n = \", n, Half);\n"
+         "  m := Metri(2.5);\n"
+         "  p := new(Nodo);\n"
+         "  p.valore := 42;\n"
+         "  p.next := nil;\n"
+         "  case c of\n"
+         "    when Rosso: writeln(\"r\");\n"
+         "    when Verde, Blu: writeln(\"vb\");\n"
+         "  end;\n"
+         "  b := (b shl 4) xor Bits32(0x0F);\n"
+         "  if s[1] = 99 and n in 1..10 and c in Colore then\n"
+         "    dispose(p);\n"
+         "  end;\n"
+         "  while n > 0 do\n"
+         "    n := n - 1;\n"
+         "    exit when n = 5;\n"
+         "  end;\n"
+         "  var k: Int32 := 3;\n"
+         "  var a: array[Int32 range 1..k] of Byte;\n"
+         "  a[1] := 2;\n"
+         "  const Z = Pi * 2.0;\n"
+         "  writeln(sqrt(m / Metri(2.0)) > Metri(Z));\n"
+         "end P.",
+         ""},
+        /* names */
+        {"program p; begin x := 1; end.", "L0021@1:18"},
+        {"program p; var Conto: Int32 := 0; begin conto := 1; end.",
+         "L0022@1:41"},
+        {"program p; var a: Int32; a: Int64; begin end.",
+         "L0023@1:26 L0000@1:16"},
+        {"program p; var writeln: Int32; begin end.", "L0023@1:16"},
+        {"program p; const A = B; const B = 1; begin end.",
+         "L0024@1:22 L0000@1:31"},
+        {"program p; type T = S; S = T; begin end.", "L0047@1:17"},
+        {"program p; type R = record x: R; end; begin end.", "L0047@1:31"},
+        /* types of operands */
+        {"program p; var a: Int32; b: Int64; begin a := b; end.", "L0027@1:47"},
+        {"program p; var a: Int32; b: Int64; begin a := a + b; end.",
+         "L0027@1:49"},
+        {"program p; var a: Int8 := 300; begin end.", "L0029@1:27"},
+        {"program p; const A: Int8 = 100 + 100; begin end.", "L0029@1:32"},
+        {"program p; begin var x := 0; end.", "L0033@1:27"},
+        {"program p; var u: UInt32 := 1; begin u := -u; end.", "L0028@1:43"},
+        {"program p; var a: Int32 := 7 / 2; begin end.", "L0028@1:30"},
+        {"program p; var a: UInt32 := 1; begin a := a shl 2; end.",
+         "L0028@1:45"},
+        {"program p; var f: Float32 := 16777217; begin end.", "L0029@1:30"},
+        {"program p; const Z: Float32 = 1e39; begin end.", "L0029@1:31"},
+        {"program p; const D = 1 div 0; begin end.", "L0032@1:24"},
+        {"program p; begin if 1 then end; end.", "L0027@1:21"},
+        {"program p; var s: String := String(1); begin end.", "L0039@1:29"},
+        /* variables, constants, calls */
+        {"program p; const C = 1; begin C := 2; end.", "L0034@1:31"},
+        {"program p; begin for var i: Int32 := 1 to 2 do i := 3; end; end.",
+         "L0034@1:48"},
+        {"program p; procedure q(a: Int32); begin a := 1; end; begin end.",
+         "L0034@1:41"},
+        {"program p; var s: String := \"a\"; begin s[1] := 65; end.",
+         "L0034@1:41"},
+        {"program p; var a: Int32; const B = a; begin end.", "L0030@1:36"},
+        {"program p; procedure q(a: Int32); begin end; begin q(); end.",
+         "L0035@1:52"},
+        {"program p; function f(): Int32; begin return 1; end; begin f(); end.",
+         "L0037@1:60"},
+        {"program p; procedure q(); begin end; var x: Int32 := q(); begin end.",
+         "L0038@1:54"},
+        {"program p; var s: String := str(1:2); begin end.", "L0048@1:33"},
+        {"program p; var a: array[Int32 range <>] of Int32; begin end.",
+         "L0049@1:19"},
+        {"program p; var n: Int32 := 3; var a: array[Int32 range 1..n] of Int32;"
+         " begin end.",
+         "L0051@1:44"},
+        /* the pragmas and the names of the checks (§ 9) */
+        {"program p; pragma sopress(range_check); begin end.", "L0057@1:19"},
+        {"program p; pragma suppress(range_chek, index_check); begin end.",
+         "L0058@1:28"},
+        /* an object reached through a pointer is no var argument, nor an
+           out record or array (§ 3.10) */
+        {"program p; type R = record a: Int32; s: String; end; var q: ^R; "
+         "procedure f(var x: Int32); begin x := 1; end f; begin q := new(R); "
+         "f(q.a); end.",
+         "L0059@1:135"},
+        {"program p; type R = record a: Int32; end; var q: ^R; procedure g(var "
+         "v: R); begin v.a := 1; end g; begin q := new(R); g(q^); end.",
+         "L0059@1:122"},
+        {"program p; type R = record a: Int32; end; var q: ^R; procedure h(out "
+         "v: R); begin v.a := 1; end h; begin q := new(R); h(q^); end.",
+         "L0059@1:122"},
+        /* records name every field, in order; once each; arrays positional or
+           by index, complete (§ 6.8) */
+        {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var v: V3 := {y: 1.0; x: 2.0; z: 0.0}; begin end.",
+         "L0085@1:145"},
+        {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var v: V3 := {x: 1.0; z: 2.0}; begin end.",
+         "L0081@1:136"},
+        {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var v: V3 := {x: 1.0, y: 2.0, z: 3.0}; begin end.",
+         "L0083@1:136"},
+        {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var v: V3 := {1.0; 2.0; 3.0}; begin end.",
+         "L0083@1:137"},
+        {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var v: V3 := {x: 1.0; x: 2.0; y: 0.0; z: 0.0}; begin end.",
+         "L0082@1:145"},
+        {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var v: V3 := {x: 1.0; y: 2.0; w: 3.0; z: 0.0}; begin end.",
+         "L0040@1:153"},
+        {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var r: Row := {1.0, 2.0, 3.0}; begin end.",
+         "L0084@1:137"},
+        {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var r: Row := {1.0, 2.0, 3.0, 4.0, 5.0}; begin end.",
+         "L0084@1:137"},
+        {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var r: Row := {1.0, 2.0, 3.0, 4.0, else 0.0}; begin end.",
+         "L0083@1:158"},
+        {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var r: Row := {1: 1.0, 2: 2.0, 4: 4.0}; begin end.",
+         "L0081@1:137"},
+        {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var r: Row := {1: 1.0, 1: 2.0, else 0.0}; begin end.",
+         "L0082@1:146"},
+        {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var n: Int32 := 1; r: Row := {n: 1.0, else 0.0}; begin end.",
+         "L0030@1:153"},
+        {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var r: Row := {1, 2: 1.0, else 0.0}; begin end.",
+         "L0083@1:141"},
+        {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var r: Row := {else 0.0, 1: 1.0}; begin end.",
+         "L0083@1:138"},
+        {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var r: Row := {5: 1.0, else 0.0}; begin end.",
+         "L0029@1:138"},
+        {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var c: Int32 := {1}; begin end.",
+         "L0083@1:139"},
+        {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var g: array[Colour] of Int32 := {Red: 1; Green: 2; Blue: 3}; begin end.",
+         "L0083@1:156"},
+        {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; const O: V3 = {x: 0.0; y: 0.0; z: 0.0}; C: array[Int32 range 1..2] of V3 = {O, O}; begin end.",
+         "L0030@1:198"},
+        {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; var n: Float64 := 1.0; const O: V3 = {x: n; y: 0.0; z: 0.0}; begin end.",
+         "L0030@1:160"},
+        {"program p; type V3 = record x, y, z: Float64; end; Colour = (Red, Green, Blue); Row = array[Int32 range 1..4] of Float64; const O: V3 = {x: 0.0; y: 0.0; z: 0.0}; procedure P(); begin O.x := 1.0; end; begin end.",
+         "L0034@1:184"},
+        /* a comparison as an element goes in parentheses (§ 6.8) */
+        {"program p; var c: array[Int32 range 1..2] of Boolean := {1 < 2, true}; begin end.",
+         "L0010@1:60"},
+        /* an aggregate for an open array: from 0 if the index has it, no
+           further than its last value (§ 6.8) */
+        {"program p; procedure P(w: array[Int8 range <>] of Int32); begin end P; begin P({0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}); end.",
+         "L0084@1:80"},
+        /* records and arrays compared whole: the same type, an open operand
+           with what could be passed to it, an aggregate typed by the other
+           operand; no order (§ 6.2) */
+        {"program p; type Va = record x: Int32; end; Wa = record x: Int32; end; var v: Va; w: Wa; begin if v = w then end; end.",
+         "L0027@1:100"},
+        {"program p; type Va = record x: Int32; end; var v: Va; begin if v < v then end; end.",
+         "L0028@1:66"},
+        {"program p; type Va = record x: Int32; end; begin if {x: 1} = {x: 1} then end; end.",
+         "L0033@1:53 L0033@1:62"},
+        {"program p; procedure P(s: array[Int32 range <>] of Int32; u: array[Int32 range <>] of Int64); begin if s = u then end; end P; begin end.",
+         "L0027@1:106"},
+        {"program p; procedure P(s: array[Int32 range <>] of Int32; t: array[Int64 range <>] of Int32); begin if s = t then end; end P; begin end.",
+         "L0027@1:106"},
+        {"program p; type Va = record x: Int32; end; var v: Va; begin if v = 1 then end; end.",
+         "L0027@1:66"},
+        {"program p; var i: Int32; s: String; begin if i = s then end; end.",
+         "L0027@1:48"},
+        {"program p; procedure P(n: Int32); var a: array[Int32 range 1..n] of Int32; var b: array[Int32 range 1..n] of Int32; begin if a = b then end; end P; begin end.",
+         "L0027@1:128"},
+        {"program p; var a: array[Int32 range 1..2] of Int32; b: array[Int32 range 1..2] of Int32; begin if a = b then end; end.",
+         "L0027@1:101"},
+        {"program p; var i: Int32; begin if i = {1} then end; end.",
+         "L0083@1:39"},
+        {"program p; procedure P(s: array[Int32 range <>] of Int32); begin if s = {1, else 0} then end; end P; begin end.",
+         "L0083@1:77"},
+        /* p^.x and p^[i]: one form, p.x and p[i] (§ 3.10) */
+        {"program p; type R = record a: Int32; end; var q: ^R; begin q := "
+         "new(R); q^.a := 1; end.",
+         "L0063@1:75"},
+        {"program p; type A = array[Int32 range <>] of Int32; begin var q := "
+         "new(A range 1..3); q^[1] := 1; end.",
+         "L0063@1:89"},
+        /* arrays made by new (§ 3.10, § 9.7) and move (§ 9.5) */
+        {"program p; type R = record x: Int32; end; procedure s(r: R); begin "
+         "end s; begin var q := new(R); s(q^); end.",
+         "L0059@1:101"},
+        {"program p; type A = array[Int32 range <>] of Int32; begin var p := "
+         "new(A range 1..3); var q := new(A range 1..3); p^ := q^; end.",
+         "L0049@1:116 L0049@1:122"},
+        {"program p; type A = array[Int32 range <>] of Int32; begin var p := "
+         "new(A); end.",
+         "L0049@1:68"},
+        {"program p; type A = array[Int32 range <>] of Int32; B = "
+         "array[Int32 range <>] of Int64; begin var p := new(A range 1..3); "
+         "var q := new(B range 1..3); move(p^, 1, q^, 1, 3); end.",
+         "L0027@1:164"},
+        {"program p; type A = array[Int32 range <>] of Int32; procedure f(a: "
+         "A); begin move(a, low(a), a, low(a), 0); end f; begin end.",
+         "L0034@1:94"},
+        /* translate, reverse, occurrences (§ 9.5): a String is not written,
+           the table is indexed by Byte and holds Bytes, the elements are
+           Bytes, reverse takes an array, written, the pattern holds Bytes,
+           the names are the language's */
+        {"program p; type T = array[Byte] of Byte; var tb: T; s: String; begin translate(s, 1, 1, tb); end.",
+         "L0027@1:80"},
+        {"program p; type T = array[Byte] of Byte; var tb: T; u: array[Int32 range 0..255] of Byte; a: array[Int32 range 1..3] of Byte; begin translate(a, 1, 3, u); end.",
+         "L0027@1:152"},
+        {"program p; type T = array[Byte] of Byte; var tb: T; type S = Byte range 0..9; var a: array[Int32 range 1..3] of S; begin translate(a, 1, 3, tb); end.",
+         "L0027@1:132"},
+        {"program p; type T = array[Byte] of Byte; var tb: T; n: Int64; begin reverse(n, 1, 1); end.",
+         "L0027@1:77"},
+        {"program p; type A = array[Int32 range <>] of Int32; procedure f(a: "
+         "A); begin reverse(a, low(a), 0); end f; begin end.",
+         "L0034@1:86"},
+        {"program p; var a: array[Int32 range 1..3] of Byte; q: array[Int32 "
+         "range 1..3] of Int32; n: Int64; begin n := occurrences(a, 1, 3, q); "
+         "end.",
+         "L0027@1:131"},
+        {"program p; var reverse: Int32; begin end.", "L0023@1:16"},
+        {"program p; type T = array[Byte] of Byte; var q: ^T; n: Int64; a: "
+         "array[Int8 range -2..2] of Byte; m: Int64; begin q := new(T); "
+         "translate(a, -2, 5, q^); n := occurrences(\"abab\", 1, 4, \"ab\"); m "
+         ":= occurrences(a, -2, 5, a); end.",
+         ""},
+        /* readbytes and writebytes (§ 9.1, § 9.2): an array of Bytes read
+           into, written; a String only written; the result used; 141 is the
+           status of a closed output */
+        {"program p; var a: array[Int32 range 1..3] of Byte; n: Int64; s: String; begin n := readbytes(s, 1, 1); end.",
+         "L0027@1:94"},
+        {"program p; var a: array[Int32 range 1..3] of Int32; begin writebytes(a, 1, 3); end.",
+         "L0027@1:70"},
+        {"program p; type S = Byte range 0..9; var a: array[Int32 range 1..3] of S; n: Int64; begin n := readbytes(a, 1, 3); end.",
+         "L0027@1:106"},
+        {"program p; type A = array[Int32 range <>] of Byte; procedure f(a: A); var n: Int64; begin n := readbytes(a, low(a), 0); end f; begin end.",
+         "L0034@1:106"},
+        {"program p; var a: array[Int32 range 1..3] of Byte; n: Int64; s: String; begin readbytes(a, 1, 3); end.",
+         "L0037@1:79"},
+        {"program p; var writebytes: Int32; begin end.", "L0023@1:16"},
+        {"program p; type Bs = array[Int32 range <>] of Byte; var q: ^Bs; n: Int64; m: Int64; begin q := new(Bs range 1..4); m := readbytes(q^, 1, 4); writebytes(q^, 1, m); writebytes(\"abc\", 2, 2); n := 1; end.",
+         ""},
+        {"program p; begin halt(141); end.", "L0055@1:23"},
+        {"program p; type R = record s: String; end; var q: ^R; b: Boolean; "
+         "begin q := new(R); b := readline(q.s); end.",
+         "L0059@1:101"},
+        {"program p; type R = record a: Int32; end; var q: ^R; b: Boolean; "
+         "begin q := new(R); b := val(\"1\", q.a); end.",
+         "L0059@1:100"},
+        /* statements */
+        {"program p; type Col = (A, B, D); var c: Col; begin case c of when A: "
+         "c := B; end; end.",
+         "L0044@1:52"},
+        {"program p; var c: Int32; begin case c of when 1..5: c := 1; when 3: "
+         "c := 2; else c := 3; end; end.",
+         "L0043@1:66"},
+        {"program p; begin exit; end.", "L0045@1:18"},
+        {"program p; procedure q(); begin return 1; end; begin end.",
+         "L0046@1:33"},
+        {"program p; function f(): Int32; begin return; end; begin end.",
+         "L0046@1:39"},
+        /* 1 is the exit status of the errors at run time */
+        {"program p; begin halt(1); end.", "L0055@1:23"},
+        {"program p; begin halt(256); end.", "L0055@1:23"},
+        /* a width from 0, decimals from 0 to 100, arguments from 1 */
+        {"program p; var x: Int32 := 1; begin writeln(x:-1); end.",
+         "L0029@1:47"},
+        {"program p; var r: Float64 := 1.0; begin writeln(r:5:101); end.",
+         "L0029@1:53"},
+        {"program p; begin writeln(arg(0)); end.", "L0029@1:30"},
+        /* the name after end is written as declared (§ 2.2) */
+        {"program p; procedure Show(); begin end show; begin end p.",
+         "L0022@1:40"},
+        {"program p; begin end P.", "L0022@1:22"},
+        /* a file that is not UTF-8: one error, no echo from the parser */
+        {"program p; \xff begin end.", "L0001@1:12"},
+        /* ord of a character, a Boolean or an enumeration only; low and high
+           of a discrete type */
+        {"program p; var x: Int32 := 1; begin writeln(ord(x)); end.",
+         "L0027@1:49"},
+        {"program p; begin writeln(low(Float64)); end.", "L0027@1:30"},
+        /* open arrays: index of the same base, same elements, bounds inside a
+           range, only for parameters */
+        {"program p; var b: array[Int16 range 1..2] of Int8; procedure Q(v: "
+         "array[Int32 range <>] of Int8); begin end Q; begin Q(b); end.",
+         "L0027@1:120"},
+        {"program p; type S = Int32 range 1..10; var a: array[Int32 range 0..20] "
+         "of Int8; procedure P(v: array[S range <>] of Int8); begin end P; begin "
+         "P(a); end.",
+         "L0029@1:145"},
+        {"program p; var y: Int32 range <>; begin end.", "L0049@1:19"},
+        {"program p; type V = array[Int8 range <>] of Int8; function F(): V; "
+         "begin end F; begin end.",
+         "L0049@1:65"},
+        /* the boundary with C (§ 3.13, § 8.5, § 10.4): what does not cross,
+           the pragmas written wrong, the restriction, the opaque pointer */
+        {"program p; procedure P(s: String); external \"c\"; begin end.",
+         "L0060@1:27"},
+        {"program p; function F(): Boolean; external \"c\"; begin end.",
+         "L0060@1:26"},
+        {"program p; type R = record a: CInt; end; procedure P(r: R); external \"c\"; begin end.",
+         "L0060@1:57"},
+        {"program p; type R = record a: CInt; end; pragma convention(c, R); type Q = ^R; procedure P(q: Q); external \"c\"; begin end.",
+         "L0060@1:95"},
+        {"program p; type S = Int32 range 1..9; procedure P(s: S); external \"c\"; begin end.",
+         "L0060@1:54"},
+        {"program p; type R = record a: String; end; pragma convention(c, R); begin end.",
+         "L0060@1:65"},
+        {"program p; type R = record a: CInt; end; pragma convention(ada, R); begin end.",
+         "L0062@1:42"},
+        {"program p; type R = record a: CInt; end; pragma convention(c, Int32); begin end.",
+         "L0062@1:63"},
+        {"program p; pragma restrictions(no_heap); begin end.", "L0062@1:12"},
+        {"program p; pragma restrictions(no_external); procedure P(); external \"c\"; begin end.",
+         "L0061@1:56"},
+        {"program p; pragma restrictions(no_external); var s: CString; begin end.",
+         "L0061@1:53"},
+        {"program p; type R = record a: CInt; end; begin pragma convention(c, R); end.",
+         "L0062@1:55"},
+        {"program p; var q: CPointer; begin q := q + 1; end.", "L0027@1:44"},
+        {"program p; var q: CPointer; i: Int64; begin i := Int64(q); end.",
+         "L0039@1:50"},
+        {"program p; type TA = new CPointer; TB = new CPointer; var x: TA; y: TB; begin x := y; end.",
+         "L0027@1:84"},
+        {"program p; var c: CInt; i: Int32 := 1; begin c := i; end.",
+         "L0027@1:51"},
+        {"program p; var s: String; begin writeln(cvalue(s)); end.",
+         "L0027@1:48"},
+        {"program p; procedure P(); external name \"x\"; begin end.",
+         "L0010@1:36"},
+        {"program p; var q: CPointer; begin writeln(q^); end.", "L0042@1:44"},
+        /* BigInt: not discrete, not bits, no range, no mixing, no
+        real constant, the limit of the constants */
+        {"program p; type R = BigInt range 1..10; begin end.", "L0050@1:21"},
+        {"program p; var a: array[BigInt] of Int32; begin end.", "L0027@1:25"},
+        {"program p; var b: BigInt := 2; i: Int32 := 2; begin i := i ** b; end.",
+         "L0028@1:63"},
+        {"program p; var b: BigInt := 2; begin b := b shl 1; end.",
+         "L0028@1:45"},
+        {"program p; var b: BigInt := 65; begin writeln(chr(b)); end.",
+         "L0027@1:51"},
+        {"program p; var b: BigInt := 2; i: Int64 := 2; begin b := b + i; end.",
+         "L0027@1:60"},
+        {"program p; var b: BigInt := 1.5; begin end.", "L0027@1:29"},
+        {"program p; const C: BigInt = 2 ** 20000; begin end.", "L0031@1:32"},
+        {"program p; var b: BigInt := 2; begin case b of when 1: writeln(1); else writeln(2); end; end.",
+         "L0027@1:43"},
+        {"program p; var b: BigInt := 2; begin b := succ(b); end.",
+         "L0027@1:48"},
+        {"program p; var b: BigInt := 2; begin for var i: BigInt := 1 to b do end; end.",
+         "L0027@1:59"},
+        {"program p; var b: BigInt := 2; begin b := b and b; end.",
+         "L0028@1:45"},
+        {"program p; var b: BigInt := 2; begin writeln(b / b); end.",
+         "L0028@1:48"},
+        {"program p; var b: BigInt := 2; begin writeln(low(BigInt)); end.",
+         "L0027@1:50"}, /* arguments by name and default values (Luxia 1, step
+                           1) */
+        {"program p; procedure q(a: Int32; b: Int32 := 0); begin end; begin q(1); q(1, 2); q(a => 1); q(b => 2, a => 1); q(1, b => 2); end.",
+         ""},
+        {"program p; procedure q(a: Int32; b: Int32 := 0); begin end; begin q(b => 1, 2); end.",
+         "L0086@1:77 L0089@1:67"},
+        {"program p; procedure q(a: Int32; b: Int32 := 0); begin end; begin q(c => 1); end.",
+         "L0087@1:69 L0089@1:67"},
+        {"program p; procedure q(a: Int32; b: Int32 := 0); begin end; begin q(1, a => 2); end.",
+         "L0088@1:72"},
+        {"program p; procedure q(a: Int32; b: Int32 := 0); begin end; begin q(b => 2); end.",
+         "L0089@1:67"},
+        {"program p; procedure q(a: Int32; b: Int32 := 0); begin end; begin q(A => 2); end.",
+         "L0022@1:69"},
+        {"program p; procedure q(a: Int32; b: Int32 := 0); begin end; begin q(1 + 1 => 2); end.",
+         "L0087@1:71 L0089@1:67"},
+        {"program p; begin writeln(x => 1); end.", "L0090@1:26"},
+        {"program p; var x: Int32; begin x := Int32(v => 1); end.",
+         "L0090@1:43"},
+        {"program p; procedure q(a: Int32; b: Int32 := 0); begin end; begin q(); q(1, 2, 3); end.",
+         "L0035@1:67 L0035@1:72"},
+        {"program p; procedure q(var a: Int32 := 1); begin end; begin end.",
+         "L0091@1:40"},
+        {"program p; procedure q(out a: Int32 := 1); begin a := 2; end; begin end.",
+         "L0091@1:40"},
+        {"program p; procedure q(a: Int32 := 1; b: Int32); begin end; begin end.",
+         "L0091@1:39"},
+        {"program p; procedure q(a: array[Int32 range <>] of Int32 := {1}); begin end; begin end.",
+         "L0091@1:61"},
+        {"program p; var n: Int32 := 3; procedure q(a: Int32 := n); begin end; begin end.",
+         "L0030@1:55"},
+        {"program p; procedure q(a: UInt8 := 300); begin end; begin end.",
+         "L0029@1:36"},
+        {"program p; procedure q(a: Int32 := \"x\"); begin end; begin end.",
+         "L0027@1:36"},
+        {"program p; type R = record x: Int32; end; var v: R; procedure q(a: R := v); begin end; begin end.",
+         "L0030@1:73"},
+        {"program p; type R = record x: Int32; end; const K: R = {x: 1}; procedure q(a: R := K; b: R := {x: 2}; c: String := \"s\"; d: BigInt := 7; e: ^R := nil); begin end; begin q(); end.",
+         ""},
+        {"program p; function f(a: Int32; b: Int32 := 1): Int32; begin return a + b; end; var x: Int32; begin x := f(b => 2); end.",
+         "L0089@1:106"},
+        /* arrays of more indices (Luxia 1, step 1) */
+        {"program p; type Mt = array[Int32 range <>, Int32 range <>] of Int32; "
+         "function e(a, b: Mt): Boolean; begin return a = b; end; begin end.",
+         "L0054@1:116"},
+        {"program p; type Gt = array[Int32 range 1..2, Int32 range 1..3] of Int32; var g: Gt; begin g[1, 2] := 3; writeln(g[1, 2], low(g, 2), high(g, 2), length(g, 2), length(g)); end.", ""},
+        {"program p; type Gt = array[Int32 range 1..2, Int32 range 1..3] of Int32; var g: Gt; begin writeln(g[1]); end.",
+         "L0092@1:100"},
+        {"program p; type Gt = array[Int32 range 1..2, Int32 range 1..3] of Int32; var g: Gt; begin writeln(g[1][2]); end.",
+         "L0092@1:100"},
+        {"program p; type At = array[Int32 range 1..2] of array[Int32 range 1..3] of Int32; var a: At; begin writeln(a[1, 2]); end.",
+         "L0092@1:109"},
+        {"program p; procedure q(m: array[Int32 range <>, Int32 range 1..2] of Int32); begin end; begin end.",
+         "L0092@1:49"},
+        {"program p; type Gt = array[Int32 range 1..2, Int32 range 1..3] of Int32; var g: Gt; k: Int32 := 2; begin writeln(low(g, 3), high(g, k)); end.",
+         "L0092@1:121 L0092@1:133"},
+        {"program p; var a: array[Int32 range 1..2] of Int32; begin writeln(low(a, 1)); end.",
+         "L0092@1:71"},
+        {"program p; type Gt = array[Int32 range 1..2, Int32 range 1..3] of Int32; var g: Gt; procedure q(a: array[Int32 range <>] of Int32); begin end; begin q(g); end.",
+         "L0027@1:152"},
+        {"program p; type At = array[Int32 range 1..2] of array[Int32 range 1..3] of Int32; var a: At; procedure q(m: array[Int32 range <>, Int32 range <>] of Int32); begin end; begin q(a); end.",
+         "L0027@1:177"},
+        {"program p; procedure q(m: array[Int32 range <>, Int32 range <>] of Int32); begin end; begin q({{1}}); end.",
+         "L0054@1:95"},
+        {"program p; type Gt = array[Int32 range 1..2, Int32 range 1..3] of Int32; var g: Gt; begin reverse(g, 1, 2); move(g, 1, g, 1, 1); end.",
+         "L0027@1:99 L0027@1:114 L0027@1:120"},
+        {"program p; type Mt = array[Int32 range <>, Int32 range <>] of Int32; var p: ^Mt; begin writeln(p[1, 1]); end.",
+         "L0054@1:97"},
+        {"program p; var n: Int32 := 2; begin var m: array[Int32 range 1..n, Int32 range 1..2] of Int32; end.",
+         "L0054@1:44"},
+        {"program p; type Gt = array[Int32 range 1..2, Int32 range 1..3] of Int32; var g: Gt; procedure q(m: array[Int32 range <>, Int64 range <>] of Int32); begin end; begin q(g); end.",
+         "L0027@1:168"},
+        {"program p; type Gt = array[Int32 range 1..2, Int32 range 1..3] of Int32; var g: Gt; procedure q(m: array[Int32 range <>, Int32 range 1..2] of Int32); begin end; begin end.",
+         "L0092@1:122"},
 };
 
 static void check_string(const char *src, char **errors)
@@ -1647,10 +1707,20 @@ static const run_case
             {"program p; var t: String := \"\"; function tag(s: String; n: Int32): "
              "String; begin return s & str(n); end; begin for var i: Int32 := 1 to "
              "3 do t := t & tag(\"a\", i); end; writeln(t); end.",
-             "a1a2a3\n", "ok"}, /* arguments by name, evaluated as written;
-                                   default values */
-            {"program p; var t: String := \"\"; function m(s: String; v: Int32): Int32; begin t := t & s; return v; end; procedure d(x, y: Int32; c: String := \"k\"; w: Int32 := 1); begin writeln(x, y, c, w); end; begin d(1, 2); d(1, 2, w => 3); d(y => 2, x => 1, c => \"r\"); d(w => m(\"w\", 4), x => m(\"x\", 5), y => m(\"y\", 6)); writeln(t); end.",
-             "12k1\n12k3\n12r1\n56k4\nwxy\n", "ok"},
+             "a1a2a3\n", "ok"},
+            /* arrays of more indices: by rows, the bounds of each, open
+               parameters of two indices */
+            {"program p; type Gt = array[Int64 range 1..2, Char range 'a'..'c'] of Int64; const K: Gt = {{1, 2, 3}, {4, 5, 6}}; function twice(x: Gt): Gt; begin var y: Gt := x; for var i := low(y) to high(y) do for var c := low(y, 2) to high(y, 2) do y[i, c] := y[i, c] * 2; end; end; return y; end; procedure bump(var x: Gt); begin x[2, 'b'] := x[2, 'b'] + 100; end; var r: record n: Int32; m: Gt; end; begin r.m := twice(K); bump(r.m); writeln(r.m[1, 'a'], r.m[2, 'b'], r.m[2, 'c'], K[2, 'c'], r.m = twice(K), twice(K)[2, 'a'], length(r.m, 2), length(K)); end.",
+             "2110126false832\n", "ok"},
+            {"program p; type Mt = array[Int64 range <>, Int64 range <>] of Float64; var h: array[Int64 range 5..7, Int64 range 1..2] of Float64 := {{1.0, 2.0}, {3.0, 4.0}, {5.0, 6.0}}; function sum(m: Mt): Float64; begin var s: Float64 := 0.0; for var i := low(m) to high(m) do for var j := low(m, 2) to high(m, 2) do s := s + m[i, j] * Float64(i - j); end; end; return s; end; procedure scale(var m: Mt; k: Float64); begin for var i := low(m, 1) to high(m, 1) do for var j := low(m, 2) to high(m, 2) do m[i, j] := m[i, j] * k; end; end; writeln(sum(m), low(m, 2), high(m, 2), length(m, 2)); end; begin writeln(sum(h)); scale(h, 2.0); writeln(h[7, 2]); end.",
+             "101.0\n202.0122\n12.0\n", "ok"},
+            {"program p; var m: array[Int32 range 1..2, Int32 range 0..2] of Int32; i: Int32 := 1; j: Int32 := 3; begin m[i, 0] := 5; writeln(m[i, 0]); writeln(m[i, j]); end.",
+             "5\n", "trap 100 at 1:148"},
+            {"program p; type Rt = Int32 range 1..3; procedure r(m: array[Int32 range <>, Rt range <>] of Int32); begin writeln(m[low(m), low(m, 2)]); end; procedure q(m: array[Int32 range <>, Int32 range <>] of Int32); begin r(m); end; var a: array[Int32 range 0..1, Int32 range 2..3] of Int32; b: array[Int32 range 0..1, Int32 range 3..4] of Int32; begin a[0, 2] := 9; q(a); q(b); end.",
+             "9\n", "trap 101 at 1:213"}, /* arguments by name, evaluated as
+                                   written; default values */
+            {"program p; var t: String := \"\"; function m(s: String; v: Int32): Int32; begin t := t & s; return v; end; procedure d(x, y: Int32; c: String := \"k\"; w: Int32 := 1); begin writeln(x, y, c, w); end; begin d(1, 2); d(1, 2, w => 3); d(y => 2, x => 1, c => \"r\"); d(w => m(\"w\", 4), x => m(\"x\", 5), y => m(\"y\", 6)); writeln(t); end.", "12k1\n12k3\n12r1\n56k4\nwxy\n",
+             "ok"},
             {"program p; type R = record x, y: Int32; end; const K: R = {x: 1; y: 2}; procedure s(a: R := K; b: R := {x: 7; y: 8}; c: String := \"s\"; d: BigInt := 12345678901234567890; e: ^R := nil; f: Float64 := 0.5); begin writeln(a.x, a.y, b.x, b.y, c, d, e = nil, f); end; begin s(); s(b => {x: 3; y: 4}, a => {x: 5; y: 6}); end.",
              "1278s12345678901234567890true0.5\n5634s12345678901234567890true0.5\n",
              "ok"},

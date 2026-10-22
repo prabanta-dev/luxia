@@ -48,6 +48,10 @@ enum {
 #define LIMBA_TF_DYNAMIC 8u     /* ARRAY: bounds computed at run time */
 #define LIMBA_TF_INCOMPLETE 16u /* RECORD: fields still being added */
 #define LIMBA_TF_CONVC 32u      /* RECORD: the layout of C, promised */
+#define LIMBA_TF_MULTI                                                         \
+    64u /* ARRAY, OPEN: one of more indices; the                               \
+           element is the array of the next ones,                              \
+           no object of its own */
 
 typedef struct {
     uint8_t kind;

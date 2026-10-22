@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Arrays of more indices, `array[I, J] of T`, as in Ada (specification
+  § 3.7.2): `a[i, j]`, laid out by rows as in C; `low(a, k)`,
+  `high(a, k)`, `length(a, k)`; aggregates nested by index; open
+  parameters of more indices, `array[I range <>, J range <>] of T`.
+  Arrays of arrays stay a form of their own. Code L0092. Not yet: computed
+  bounds, `new`, an open one compared whole or given an aggregate
+  (L0054). `lx_gen` writes arrays of two indices.
+- Fixed: comparing arrays of arrays as a whole made `luxia` refuse the
+  program ("function 2 is not declared"): every comparison function is
+  now declared before the first body is given.
 - Arguments by name, `f(x => 1)`, and default values of parameters,
   `from: Int64 := 1` (specification § 8.6, § 8.7): those by position
   first, evaluated as written; a default value is a constant, only

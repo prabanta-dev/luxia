@@ -1043,7 +1043,8 @@ static void undefined(void *ctx, uint32_t tag)
 static limba_id func_type(lxl *L, limba_sym s)
 {
     const limba_typeinfo *sig = ti(L, L->S->st.sym[s].type);
-    limba_id *ps = limba_xmalloc((3 * sig->count + 2) * sizeof(*ps));
+    limba_id *ps =
+        limba_xmalloc(((1 + 2 * LXL_MAXDIMS) * sig->count + 2) * sizeof(*ps));
     uint32_t n = 0;
     bool agg = sig->elem != L->S->ts.void_ && !lxl_scalar(L, sig->elem);
     if (agg)
@@ -1051,9 +1052,11 @@ static limba_id func_type(lxl *L, limba_sym s)
     for (uint32_t i = 0; i < sig->count; i++) {
         limba_param p = L->S->ts.param[sig->first + i];
         if (ti(L, p.type)->kind == LIMBA_LTK_OPEN) {
-            ps[n++] = LIMBA_T_PTR; /* address, low, high */
-            ps[n++] = LIMBA_T_I64;
-            ps[n++] = LIMBA_T_I64;
+            ps[n++] = LIMBA_T_PTR; /* address, low, high of each index */
+            for (uint32_t d = 0; d < lxl_dims(L, p.type); d++) {
+                ps[n++] = LIMBA_T_I64;
+                ps[n++] = LIMBA_T_I64;
+            }
         } else if (p.mode != LXS_IN || !lxl_scalar(L, p.type)) {
             ps[n++] = LIMBA_T_PTR;
         } else {
@@ -1220,11 +1223,18 @@ static void routine_body(lxl *L, limba_sym s)
             f = limba_ssa_func(L->ssa);
             limba_id first = f->blocks[0].insts[v];
             if (ti(L, pp.type)->kind == LIMBA_LTK_OPEN) {
+                uint32_t nd_ = lxl_dims(L, pp.type);
                 st->kind = LXL_OPEN;
                 st->addr = first;
                 st->lo = f->blocks[0].insts[v + 1];
                 st->hi = f->blocks[0].insts[v + 2];
-                v += 3;
+                if (nd_ > 1) {
+                    free(st->dims);
+                    st->dims = limba_xmalloc(2 * (nd_ - 1) * sizeof(limba_id));
+                    for (uint32_t d = 0; d < 2 * (nd_ - 1); d++)
+                        st->dims[d] = f->blocks[0].insts[v + 3 + d];
+                }
+                v += 1 + 2 * nd_;
             } else if (pp.mode == LXS_OUT && lxl_scalar(L, pp.type)) {
                 /* copied back at every return, as Ada does with scalars:
                    an SSA variable with no value yet, where a missing value
@@ -1321,6 +1331,15 @@ void lxl_begin_function(lxl *L, limba_id fid)
 void lxl_end_function(lxl *L, uint32_t node, bool function)
 {
     end_function(L, node, function);
+}
+
+uint32_t lxl_dims(const lxl *L, limba_ltype t)
+{
+    uint32_t n = 1;
+    for (const limba_typeinfo *x = &L->S->ts.t[t]; x->flags & LIMBA_TF_MULTI;
+         x = &L->S->ts.t[x->elem])
+        n++;
+    return n;
 }
 
 limba_id lxl_eq_declare(lxl *L, limba_ltype t, limba_id ftype)
@@ -1582,6 +1601,8 @@ limba_module *limba_lxl_program_each(limba_lxs *S,
     end_function(L, last, false);
 
 done:
+    for (uint32_t s = 0; s <= S->st.nsym; s++)
+        free(L->store[s].dims);
     free(L->store);
     free(L->taken);
     free(L->assigned);

@@ -236,13 +236,25 @@ uint32_t limba_lxp_type(limba_lxp *P)
         limba_lxp_next(P);
         {
             limba_lxp_expect(P, LX_LBRACK, "after array");
-            uint32_t index = limba_lxp_type(P);
+            /* array[I, J] of T: one array of more indices, nested in the
+               tree, the outer ones marked by op , */
+            uint32_t idx[64], n = 0;
+            do {
+                uint32_t t = limba_lxp_type(P);
+                if (n < 64)
+                    idx[n++] = t;
+            } while (limba_lxp_accept(P, LX_COMMA));
             limba_lxp_expect(P, LX_RBRACK, "after the index type");
             limba_lxp_expect(P, LX_KW_OF, NULL);
             uint32_t elem = limba_lxp_type(P);
-            bool open = P->t->node[index].kind == LXN_TBOX;
-            return lxp_node(P, open ? LXN_TOPEN : LXN_TARRAY, loc, index, elem,
-                            0, 0);
+            for (uint32_t total = n; n--;) {
+                bool open = P->t->node[idx[n]].kind == LXN_TBOX;
+                elem = lxp_node(P, open ? LXN_TOPEN : LXN_TARRAY, loc, idx[n],
+                                elem, 0, 0);
+                if (n + 1 < total)
+                    P->t->node[elem].op = LX_COMMA;
+            }
+            return elem;
         }
     case LX_KW_RECORD: {
         limba_lxp_next(P);

@@ -127,3 +127,8 @@ LX_ERROR(90, NAMED_PLACE)       /* name => value in a call of a routine of
 LX_ERROR(91, DEFAULT_PLACE)     /* a default value on a var, out or open
                                    array parameter, or a parameter without
                                    one after one with one */
+/* arrays of more indices (Luxia 1, step 1) */
+LX_ERROR(92, MULTI_INDEX)       /* an array of more indices indexed in
+                                   part, or a[i][j]; a[i, j] of an array of
+                                   arrays; indices open and not open
+                                   mixed; low(a, k) past its indices */

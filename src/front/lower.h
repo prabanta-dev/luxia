@@ -67,6 +67,9 @@ typedef struct {
     limba_id global; /* GLOBAL */
     limba_id count;  /* DYN: the number of elements, an i64 value */
     limba_id back;   /* an out parameter: where its value goes back */
+    /* OPEN of more indices: the bounds of the indices after the first,
+       i64 values, low then high of each (malloc'd) */
+    limba_id *dims;
     /* the variable of a for: the array (or string) whose bounds hold it,
        below and above, all through the body; LXL_ONE for a lower bound
        of 1 and more, the first index of every string */
@@ -74,6 +77,9 @@ typedef struct {
 } lxl_store;
 
 #define LXL_ONE UINT32_MAX
+
+/* the indices of an open array of more indices a routine may take */
+#define LXL_MAXDIMS 8
 
 typedef struct {
     limba_id exit, cont;
@@ -146,6 +152,9 @@ typedef struct {
     limba_id *eq_of;
     uint32_t neq_anon;
 } lxl;
+
+/* the indices of array type t: 1, or more for an array of more */
+uint32_t lxl_dims(const lxl *L, limba_ltype t);
 
 /* IR types */
 limba_id lxl_type(lxl *L, limba_ltype t);

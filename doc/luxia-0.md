@@ -247,9 +247,9 @@ array[UInt8 range 1..10] of T
 array[Colour] of T
 ```
 
-- The index type is part of the array type. An array has one index;
-  several dimensions are written as arrays of arrays
-  (`array[I] of array[J] of T`).
+- The index type is part of the array type. An array has one index, or
+  several (§ 3.7.2); an array of arrays (`array[I] of array[J] of T`) is
+  a form of its own, whose elements are arrays.
 - Indices are **always checked** (the compiler removes the checks it can
   prove unnecessary).
 - **Computed bounds**: the bounds may be computed at run time, as in
@@ -319,6 +319,42 @@ type Vector = array[Int32 range <>] of Float64;
   parameter, with the same bounds.
 - An aggregate passed to an open-array parameter has the bounds given
   in § 6.8.
+
+#### 3.7.2 Arrays of more indices
+
+Arrays of more indices correspond to Ada's multidimensional arrays.
+
+```pascal
+type
+  Grid = array[Int32 range 1..3, Int32 range 1..4] of Float64;
+  Matrix = array[Int64 range <>, Int64 range <>] of Float64;
+```
+
+- `array[I1, I2, ...] of T` is **one array of n indices**, not an array
+  of arrays: it has no rows of its own. Each index type follows the rules
+  of § 3.7.
+- An element is `a[i, j]`: **all the indices in one pair of brackets**,
+  evaluated from left to right after the array, each checked against its
+  own bounds (index error). `a[i]` alone and `a[i][j]` are compile-time
+  errors; so is `a[i, j]` on an array of arrays, whose element is
+  `a[i][j]`.
+- The elements are laid out **by rows, as in C**: the last index varies
+  fastest, and the array is contiguous; with the convention of C it goes
+  to C as the address of its first element (§ 8.5).
+- `low(a, k)`, `high(a, k)` and `length(a, k)` give the bounds and the
+  length of index `k`, a constant from 1 to n (Ada's `A'First (K)`);
+  `low(a)`, `high(a)` and `length(a)` are those of the first index.
+- A whole value is written with **aggregates nested by index** (§ 6.8):
+  `{{1.0, 0.0}, {0.0, 1.0}}`, `{1: {1: 1.0, else 0.0}, else {else 0.0}}`.
+- An array of more indices is assigned and compared (§ 6.2) as a whole,
+  as any array of its type.
+- **Open**: `array[I1 range <>, I2 range <>] of T` has **all its indices
+  open, or none**. It is the type of a parameter, as in § 3.7.1, and
+  takes the bounds of every index from the argument: an array of as many
+  indices, of the same base index by index, with elements of the same
+  type. A subtype index checks the bounds of its index as in § 3.7.1.
+- The routines of the predefined library on arrays (§ 9.5) take arrays
+  of one index.
 
 ### 3.8 Strings as open arrays
 
@@ -1922,7 +1958,7 @@ Param      = [ "var" | "out" ] IdentList ":" Type [ ":=" Expr ] .
 Type       = QualIdent [ "range" ( Range | "<>" ) ]
            | "new" Type
            | "(" IdentList ")"
-           | "array" "[" Type "]" "of" Type
+           | "array" "[" Type { "," Type } "]" "of" Type
            | "record" { IdentList ":" Type ";" } "end"
            | "^" Type .
 Range      = Simple ".." Simple .
@@ -1956,7 +1992,7 @@ Primary    = integer | real | char | string | "true" | "false" | "nil"
            | Designator | "(" Expr ")" | "new" "(" Type ")" | Aggregate .
 Aggregate  = "{" [ Component { ( "," | ";" ) Component } ] "}" .
 Component  = "else" Expr | Simple [ [ ".." Simple ] ":" Expr ] .
-Designator = ident { "." ident | "[" Expr "]" | "^" | "(" [ Arg { "," Arg } ] ")" } .
+Designator = ident { "." ident | "[" Expr { "," Expr } "]" | "^" | "(" [ Arg { "," Arg } ] ")" } .
 Arg        = Expr [ ":" Expr [ ":" Expr ] | "=>" Expr ] .
 ```
 
@@ -1997,6 +2033,8 @@ and tools can anticipate them.
   run-time checks as Ada's `Constraint_Error` does.
 - An order (`<`) on arrays of discrete elements, as in Ada.
 - Sets; the brackets of Pascal (`[a, b]`) remain free for them.
+- Arrays of more indices with computed bounds, or made by `new`; open
+  arrays of more indices compared as a whole, or given an aggregate.
 - Assignment of whole open arrays, with a length check.
 - Iteration over the Unicode characters of a string.
 - Redefinition of the names of the predefined library.

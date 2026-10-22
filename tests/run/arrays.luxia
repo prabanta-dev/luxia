@@ -1,0 +1,37 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+//
+// arrays of arrays compared as a whole (their comparison functions all
+// declared before the first body is given), arrays of two indices by rows,
+// an open parameter of two indices, arguments by name and default values.
+program Arrays;
+
+type
+  Pair = array[Int32 range 1..2] of array[Int32 range 1..2] of Int32;
+  Grid = array[Int64 range 1..2, Char range 'a'..'c'] of Int64;
+  Matrix = array[Int64 range <>, Char range <>] of Int64;
+
+var
+  p, q: Pair;
+  g: Grid := {{1, 2, 3}, {4, 5, 6}};
+
+function Total(m: Matrix; weight: Int64 := 1): Int64;
+begin
+  var s: Int64 := 0;
+  for var i := low(m) to high(m) do
+    for var c := low(m, 2) to high(m, 2) do
+      s := s + m[i, c] * weight;
+    end;
+  end;
+  return s;
+end Total;
+
+begin
+  p := {{1, 2}, {3, 4}};
+  q := p;
+  writeln(p = q);
+  q[2][1] := 0;
+  writeln(p = q, " ", q[2][1]);
+  g[2, 'b'] := 50;
+  writeln(g[2, 'b'], " ", length(g, 2), " ", Total(g), " ", Total(weight => 2, m => g));
+end Arrays.

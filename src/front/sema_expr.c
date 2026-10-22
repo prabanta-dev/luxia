@@ -298,6 +298,14 @@ static limba_ltype compare_whole(limba_lxs *S, uint32_t node, unsigned op,
         return op_error(S, node, composite(S, lt) ? lt : rt,
                         "compares scalars and strings");
     unsigned lk = kind(S, lt), rk = kind(S, rt);
+    if ((lk == LIMBA_LTK_OPEN && (lxs_ty(S, lt)->flags & LIMBA_TF_MULTI)) ||
+        (rk == LIMBA_LTK_OPEN && (lxs_ty(S, rt)->flags & LIMBA_TF_MULTI))) {
+        lxs_error(S, LXE_UNSUPPORTED, node,
+                  "'%s' of an open array of more indices is not translated "
+                  "yet: compare the elements",
+                  ot);
+        return set(S, node, 0);
+    }
     bool arrays = (lk == LIMBA_LTK_ARRAY || lk == LIMBA_LTK_OPEN) &&
                   (rk == LIMBA_LTK_ARRAY || rk == LIMBA_LTK_OPEN);
     bool ok = lxs_compatible(S, lt, rt);
@@ -638,6 +646,28 @@ static limba_ltype index_expr(limba_lxs *S, uint32_t node, uint32_t scope)
     }
     const limba_typeinfo *ti = lxs_ty(S, t);
     char tb[128];
+    /* an array of more indices takes them all in one [ ], a[i, j]; the
+       node of each index but the last has op , (its type is the array of
+       the next indices, no value of its own) */
+    bool more = x->op == LX_COMMA;
+    bool multi = (ti->kind == LIMBA_LTK_ARRAY || ti->kind == LIMBA_LTK_OPEN) &&
+                 (ti->flags & LIMBA_TF_MULTI);
+    if (multi != more) {
+        lxs_error(S, LXE_MULTI_INDEX, node,
+                  multi ? "%s takes all its indices in one [ ]: a[i, j]"
+                        : "%s has one index: a[i][j] for an array of arrays",
+                  lxs_tname(S, t, tb));
+        lxs_expr(S, idx, scope, 0);
+        return set(S, node, 0);
+    }
+    if (multi && ti->kind == LIMBA_LTK_OPEN && S->type[base] &&
+        lxs_ty(S, S->type[base])->kind == LIMBA_LTK_POINTER) {
+        lxs_error(S, LXE_UNSUPPORTED, node,
+                  "an array of more indices made by new is not translated "
+                  "yet");
+        lxs_expr(S, idx, scope, 0);
+        return set(S, node, 0);
+    }
     switch (ti->kind) {
     case LIMBA_LTK_ARRAY:
         index = ti->index;
@@ -659,6 +689,7 @@ static limba_ltype index_expr(limba_lxs *S, uint32_t node, uint32_t scope)
         return set(S, node, 0);
     }
     lxs_expr(S, idx, scope, index);
+    ti = lxs_ty(S, t); /* the index may have added types */
     if (ti->flags & LIMBA_TF_DYNAMIC)
         index = lxs_base(S, index);
     lxs_assign_to(S, idx, index, "the index");
@@ -746,35 +777,64 @@ static void check_format(limba_lxs *S, uint32_t list)
     }
 }
 
+/* an array of type at fits open parameter type pt: arrays both, index
+   by index of one base (as many indices), elements compatible */
+static bool open_fits(limba_lxs *S, limba_ltype at, limba_ltype pt)
+{
+    const limba_typeinfo *a = lxs_ty(S, at), *p = lxs_ty(S, pt);
+    if (a->kind != LIMBA_LTK_ARRAY && a->kind != LIMBA_LTK_OPEN)
+        return false;
+    if (lxs_base(S, a->index) != lxs_base(S, p->index))
+        return false;
+    bool am = a->flags & LIMBA_TF_MULTI, pm = p->flags & LIMBA_TF_MULTI;
+    if (am != pm)
+        return false;
+    if (pm)
+        return open_fits(S, a->elem, p->elem);
+    return lxs_compatible(S, a->elem, p->elem);
+}
+
 /* an argument a of a routine for parameter p: its type, its mode */
 static void routine_arg(limba_lxs *S, uint32_t a, uint32_t scope, limba_param p)
 {
     char ta[128], tb[128];
     if (kind(S, p.type) == LIMBA_LTK_OPEN) {
-        /* the same elements, an index of the same base (§ 4.5); an
-           aggregate takes its bounds from the parameter (§ 6.8) */
+        /* the same elements, an index of the same base (§ 4.5), index by
+           index for an array of more; an aggregate takes its bounds from
+           the parameter (§ 6.8) */
+        bool pmulti = lxs_ty(S, p.type)->flags & LIMBA_TF_MULTI;
+        if (pmulti && lxs_node(S, a)->kind == LXN_AGG) {
+            lxs_error(S, LXE_UNSUPPORTED, a,
+                      "an aggregate for an open array of more indices is not "
+                      "translated yet: declare a variable");
+            return;
+        }
         limba_ltype at =
             lxs_expr(S, a, scope, lxs_node(S, a)->kind == LXN_AGG ? p.type : 0);
-        unsigned ak = at ? kind(S, at) : 0;
-        const limba_typeinfo *pt = lxs_ty(S, p.type);
-        if (at &&
-            !((ak == LIMBA_LTK_ARRAY || ak == LIMBA_LTK_OPEN) &&
-              lxs_compatible(S, lxs_ty(S, at)->elem, pt->elem) &&
-              lxs_base(S, lxs_ty(S, at)->index) == lxs_base(S, pt->index)))
+        if (at && !open_fits(S, at, p.type))
             lxs_error(S, LXE_TYPE_MISMATCH, a,
                       "this is %s, the parameter is %s", lxs_tname(S, at, ta),
                       lxs_tname(S, p.type, tb));
-        else if (at && ak == LIMBA_LTK_ARRAY &&
-                 !(lxs_ty(S, at)->flags & LIMBA_TF_DYNAMIC) &&
-                 (lxs_ty(S, pt->index)->flags & LIMBA_TF_RANGE)) {
-            /* bounds known now: those of a non-empty array must
-               belong to the index of the parameter */
-            const limba_typeinfo *ai = lxs_ty(S, lxs_ty(S, at)->index);
-            const limba_typeinfo *pi = lxs_ty(S, pt->index);
-            if (ai->lo <= ai->hi && (ai->lo < pi->lo || ai->hi > pi->hi))
-                lxs_error(S, LXE_CONST_RANGE, a,
-                          "the bounds of this array are past %s",
-                          lxs_tname(S, pt->index, tb));
+        else if (at && kind(S, at) == LIMBA_LTK_ARRAY &&
+                 !(lxs_ty(S, at)->flags & LIMBA_TF_DYNAMIC)) {
+            /* bounds known now: those of a non-empty array must belong
+               to the index of the parameter, each */
+            limba_ltype ad = at, pd = p.type;
+            for (;;) {
+                const limba_typeinfo *ai = lxs_ty(S, lxs_ty(S, ad)->index);
+                const limba_typeinfo *pi = lxs_ty(S, lxs_ty(S, pd)->index);
+                if ((pi->flags & LIMBA_TF_RANGE) && ai->lo <= ai->hi &&
+                    (ai->lo < pi->lo || ai->hi > pi->hi)) {
+                    lxs_error(S, LXE_CONST_RANGE, a,
+                              "the bounds of this array are past %s",
+                              lxs_tname(S, lxs_ty(S, pd)->index, tb));
+                    break;
+                }
+                if (!(lxs_ty(S, pd)->flags & LIMBA_TF_MULTI))
+                    break;
+                ad = lxs_ty(S, ad)->elem;
+                pd = lxs_ty(S, pd)->elem;
+            }
         }
     } else if (p.mode == LXS_IN) {
         lxs_expr(S, a, scope, p.type);
@@ -1026,6 +1086,53 @@ static void const_within(limba_lxs *S, uint32_t a, __int128 lo, __int128 hi,
         lxs_error(S, LXE_CONST_RANGE, a, "%s", what);
 }
 
+/* low(a, k), high(a, k), length(a, k): of index k of an array of more
+   indices, k a constant from 1; static bounds are constants */
+static limba_ltype dimension(limba_lxs *S, uint32_t node, uint32_t scope,
+                             unsigned id, const char *nm)
+{
+    uint32_t a = arg_at(S, node, 0), kn = arg_at(S, node, 1);
+    S->open_ok = true;
+    limba_ltype t = lxs_expr(S, a, scope, 0);
+    S->open_ok = false;
+    lxs_expr(S, kn, scope, 0);
+    if (!t)
+        return set(S, node, 0);
+    char tb[128];
+    const limba_typeinfo *ti = lxs_ty(S, t);
+    if ((ti->kind != LIMBA_LTK_ARRAY && ti->kind != LIMBA_LTK_OPEN) ||
+        !(ti->flags & LIMBA_TF_MULTI)) {
+        lxs_error(S, LXE_MULTI_INDEX, a,
+                  "%s(a, k) takes an array of more indices, not %s", nm,
+                  lxs_tname(S, t, tb));
+        return set(S, node, 0);
+    }
+    uint32_t dims = 1;
+    for (const limba_typeinfo *d = ti; d->flags & LIMBA_TF_MULTI;
+         d = lxs_ty(S, d->elem))
+        dims++;
+    __int128 k = 0;
+    if (!S->val[kn] || !lxs_value_to_int(S, S->val[kn], &k) || k < 1 ||
+        k > dims) {
+        lxs_error(S, LXE_MULTI_INDEX, kn,
+                  "the index k of %s(a, k) is a constant from 1 to %u", nm,
+                  dims);
+        return set(S, node, 0);
+    }
+    for (__int128 i = 1; i < k; i++)
+        ti = lxs_ty(S, ti->elem);
+    limba_ltype it = id == LXB_LENGTH ? S->ty_int[3] : lxs_base(S, ti->index);
+    if (ti->kind == LIMBA_LTK_ARRAY && !(ti->flags & LIMBA_TF_DYNAMIC)) {
+        const limba_typeinfo *ix = lxs_ty(S, ti->index);
+        __int128 v = id == LXB_LOW     ? ix->lo
+                     : id == LXB_HIGH  ? ix->hi
+                     : ix->hi < ix->lo ? 0
+                                       : ix->hi - ix->lo + 1;
+        S->val[node] = lxs_value_int(S, v);
+    }
+    return set(S, node, it);
+}
+
 static limba_ltype builtin(limba_lxs *S, uint32_t node, uint32_t scope,
                            limba_sym s, limba_ltype expected)
 {
@@ -1079,6 +1186,8 @@ static limba_ltype builtin(limba_lxs *S, uint32_t node, uint32_t scope,
     case LXB_LENGTH:
     case LXB_LOW:
     case LXB_HIGH: {
+        if (lxs_node(S, lxs_node(S, node)->b)->b == 2)
+            return dimension(S, node, scope, id, nm);
         if (!arity(S, node, 1, nm, scope))
             return set(S, node, 0);
         uint32_t a = arg_at(S, node, 0);
@@ -1250,9 +1359,11 @@ static limba_ltype builtin(limba_lxs *S, uint32_t node, uint32_t scope,
             S->open_ok = false;
             unsigned sk = st ? kind(S, st) : 0;
             limba_ltype ib = 0;
-            if (st && sk != LIMBA_LTK_ARRAY && sk != LIMBA_LTK_OPEN)
+            if (st && ((sk != LIMBA_LTK_ARRAY && sk != LIMBA_LTK_OPEN) ||
+                       (lxs_ty(S, st)->flags & LIMBA_TF_MULTI)))
                 lxs_error(S, LXE_TYPE_MISMATCH, src,
-                          "move copies between arrays, not from %s",
+                          "move copies between arrays of one index, not from "
+                          "%s",
                           lxs_tname(S, st, ta));
             else if (st)
                 ib = lxs_base(S, lxs_ty(S, st)->index);
@@ -1261,9 +1372,11 @@ static limba_ltype builtin(limba_lxs *S, uint32_t node, uint32_t scope,
             limba_ltype dt = lxs_expr(S, dst, scope, 0);
             S->open_ok = false;
             unsigned dk = dt ? kind(S, dt) : 0;
-            if (dt && dk != LIMBA_LTK_ARRAY && dk != LIMBA_LTK_OPEN)
+            if (dt && ((dk != LIMBA_LTK_ARRAY && dk != LIMBA_LTK_OPEN) ||
+                       (lxs_ty(S, dt)->flags & LIMBA_TF_MULTI)))
                 lxs_error(S, LXE_TYPE_MISMATCH, dst,
-                          "move copies between arrays, not into %s",
+                          "move copies between arrays of one index, not into "
+                          "%s",
                           lxs_tname(S, dt, ta));
             else if (dt && ib &&
                      (!lxs_compatible(S, lxs_ty(S, dt)->elem,
@@ -1312,10 +1425,11 @@ static limba_ltype builtin(limba_lxs *S, uint32_t node, uint32_t scope,
             S->open_ok = false;
             unsigned ak = at ? kind(S, at) : 0;
             limba_ltype ib = 0;
-            if (at && ak != LIMBA_LTK_ARRAY && ak != LIMBA_LTK_OPEN) {
+            if (at && ((ak != LIMBA_LTK_ARRAY && ak != LIMBA_LTK_OPEN) ||
+                       (lxs_ty(S, at)->flags & LIMBA_TF_MULTI))) {
                 char ta[128];
                 lxs_error(S, LXE_TYPE_MISMATCH, a,
-                          "reverse takes an array, not %s",
+                          "reverse takes an array of one index, not %s",
                           lxs_tname(S, at, ta));
             } else if (at) {
                 ib = lxs_base(S, lxs_ty(S, at)->index);

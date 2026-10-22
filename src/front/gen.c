@@ -310,7 +310,12 @@ enum {
     S_RDB,
     S_WRB,
     S_WRS,
-    S_RDZ
+    S_RDZ,
+    /* an array of two indices (Luxia 1, step 1), in the body of the
+       program: declared, filled by two for, sometimes scaled through an
+       open parameter of two indices, an element and its bounds written,
+       its total by the open parameter; mat[fld] holds the numbers */
+    S_MAT
 };
 
 typedef struct {
@@ -426,6 +431,15 @@ typedef struct {
     /* and the web of units around it, NULL for none */
     struct web *web;
     bool lib_named; /* the program names a routine of Lib */
+    /* the arrays of two indices: m[i, j] = i * a + j * b + c on
+       lo1..hi1, lo2..hi2, times k when scaled; element i1, j1 written,
+       the total with weight w; the [ of that element */
+    struct xmat {
+        int64_t lo1, hi1, lo2, hi2, a, b, c, k, i1, j1, w;
+        bool scale;
+        uint32_t line, col;
+    } *mat;
+    uint32_t nmat, capmat;
 } G;
 
 static uint32_t new_str(G *g, const char *b, size_t n)
@@ -3197,9 +3211,39 @@ static uint32_t heap_array(G *g, uint32_t *out)
     return heap_free(g, (uint32_t)h, out);
 }
 
+/* an array of two indices in the body of the program (S_MAT) */
+static uint32_t matrix(G *g, uint32_t *out)
+{
+    LIMBA_GROW(g->mat, g->nmat, g->capmat);
+    struct xmat *m = &g->mat[g->nmat];
+    m->lo1 = (int64_t)below(g, 5) - 2;
+    m->hi1 = m->lo1 + (int64_t)below(g, 4);
+    m->lo2 = (int64_t)below(g, 5) - 2;
+    m->hi2 = m->lo2 + (int64_t)below(g, 4);
+    m->a = (int64_t)below(g, 101) - 50;
+    m->b = (int64_t)below(g, 101) - 50;
+    m->c = (int64_t)below(g, 101) - 50;
+    m->scale = chance(g, 50);
+    m->k = 1 + (int64_t)below(g, 3);
+    m->w = 1 + (int64_t)below(g, 3);
+    /* the element written: inside, or now and then just outside */
+    m->i1 = m->lo1 + (int64_t)below(g, (uint32_t)(m->hi1 - m->lo1 + 1));
+    m->j1 = m->lo2 + (int64_t)below(g, (uint32_t)(m->hi2 - m->lo2 + 1));
+    if (chance(g, 10))
+        m->i1 = chance(g, 50) ? m->lo1 - 1 : m->hi1 + 1;
+    else if (chance(g, 10))
+        m->j1 = chance(g, 50) ? m->lo2 - 1 : m->hi2 + 1;
+    uint32_t s = new_s(g, S_MAT);
+    g->st[s].fld = g->nmat++;
+    out[0] = s;
+    return 1;
+}
+
 static uint32_t stmt(G *g, uint32_t *out)
 {
     g->budget--;
+    if (g->cur < 0 && chance(g, 3))
+        return matrix(g, out);
     unsigned c = below(g, 100);
     bool pure = in_function(g);
     bool deep = g->nesting < 4 && g->budget > 4;
@@ -4628,6 +4672,45 @@ static void pstmt(G *g, text *o, uint32_t si, int ind)
         }
         put(o, ");\n");
         break;
+    case S_MAT: {
+        struct xmat *m = &g->mat[s.fld];
+        uint32_t n = s.fld;
+        putf(o,
+             "var mx%u: array[Int64 range %lld..%lld, Int64 range "
+             "%lld..%lld] of Int64;\n",
+             n, (long long)m->lo1, (long long)m->hi1, (long long)m->lo2,
+             (long long)m->hi2);
+        indent(o, ind);
+        putf(o, "for var mi%u := low(mx%u, 1) to high(mx%u, 1) do\n", n, n, n);
+        indent(o, ind + 1);
+        putf(o, "for var mj%u := low(mx%u, 2) to high(mx%u, 2) do\n", n, n, n);
+        indent(o, ind + 2);
+        putf(o, "mx%u[mi%u, mj%u] := mi%u * (%lld) + mj%u * (%lld) + (%lld);\n",
+             n, n, n, n, (long long)m->a, n, (long long)m->b, (long long)m->c);
+        indent(o, ind + 1);
+        put(o, "end;\n");
+        indent(o, ind);
+        put(o, "end;\n");
+        if (m->scale) {
+            indent(o, ind);
+            putf(o, "mscale(mx%u, %lld);\n", n, (long long)m->k);
+        }
+        /* the indices in variables: a constant outside is no program */
+        indent(o, ind);
+        putf(o, "var mo%u: Int64 := %lld;\n", n, (long long)m->i1);
+        indent(o, ind);
+        putf(o, "var mp%u: Int64 := %lld;\n", n, (long long)m->j1);
+        indent(o, ind);
+        putf(o, "writeln(mx%u", n);
+        m = &g->mat[s.fld];
+        m->line = o->line + o->lbase;
+        m->col = o->col;
+        putf(o,
+             "[mo%u, mp%u], \" \", length(mx%u, 2), \" \", low(mx%u, 2), \" "
+             "\", mtotal(mx%u), \" \", mtotal(mx%u, w => %lld));\n",
+             n, n, n, n, n, n, (long long)m->w);
+        break;
+    }
     case S_RDZ:
         putf(o, "var z%u: array[Int32 range 1..4] of Byte;\n", si);
         indent(o, ind);
@@ -5081,6 +5164,17 @@ static void program(G *g, text *o, uint32_t nglob)
     for (uint32_t r = 0; r < g->nr; r++)
         if (!g->moved || !g->moved[r])
             routine_text(g, o, r, false);
+    if (g->nmat)
+        put(o, "\nfunction mtotal(m: array[Int64 range <>, Int64 range <>] "
+               "of Int64; w: Int64 := 1): Int64;\nbegin\n  var s: Int64 := "
+               "0;\n  for var i := low(m, 1) to high(m, 1) do\n    for var j "
+               ":= low(m, 2) to high(m, 2) do\n      s := s + m[i, j] * "
+               "w;\n    end;\n  end;\n  return s;\nend mtotal;\n"
+               "\nprocedure mscale(var m: array[Int64 range <>, Int64 range "
+               "<>] of Int64; k: Int64);\nbegin\n  for var i := low(m) to "
+               "high(m) do\n    for var j := low(m, 2) to high(m, 2) do\n "
+               "     m[i, j] := m[i, j] * k;\n    end;\n  end;\nend "
+               "mscale;\n");
     put(o, "\nbegin\n");
     if (g->web)
         web_program_print(o, g->web);
@@ -6720,6 +6814,31 @@ static int run_stmt(X *x, uint32_t si)
         put(&x->out, "\n");
         return X_NEXT;
     }
+    case S_MAT: {
+        /* every number known when the program was made */
+        const struct xmat *m = &g->mat[s->fld];
+        if (m->i1 < m->lo1 || m->i1 > m->hi1 || m->j1 < m->lo2 ||
+            m->j1 > m->hi2) {
+            stop(x, 100, m->line, m->col);
+            return X_RET;
+        }
+        int64_t k = m->scale ? m->k : 1, total = 0;
+        for (int64_t i = m->lo1; i <= m->hi1; i++)
+            for (int64_t j = m->lo2; j <= m->hi2; j++)
+                total += (i * m->a + j * m->b + m->c) * k;
+        int64_t e = (m->i1 * m->a + m->j1 * m->b + m->c) * k;
+        print_value(g, &x->out, T_I64, e);
+        put(&x->out, " ");
+        print_value(g, &x->out, T_I64, m->hi2 - m->lo2 + 1);
+        put(&x->out, " ");
+        print_value(g, &x->out, T_I64, m->lo2);
+        put(&x->out, " ");
+        print_value(g, &x->out, T_I64, total);
+        put(&x->out, " ");
+        print_value(g, &x->out, T_I64, total * m->w);
+        put(&x->out, "\n");
+        return X_NEXT;
+    }
     case S_RDZ: {
         /* the span inside zN: up to count bytes of the input, fewer
            only at its end, which is final; how many, written */
@@ -6821,6 +6940,7 @@ static void g_free(G *g)
     free(g->ls);
     free(g->v);
     free(g->r);
+    free(g->mat);
     free(g->scope);
     free(g->gc);
     free(g->fld);
