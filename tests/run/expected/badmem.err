@@ -1,0 +1,2 @@
+luxia: warning: --suppress turns checks off in the whole of tests/run/badmem.luxia: where one would fail, the behaviour is undefined
+luxia: wrong module: memory accessed with no check of nil

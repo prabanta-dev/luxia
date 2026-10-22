@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+//
+// a field read through nil with the checks of nil and of dangling
+// pointers off (badmem.opts): the module touches memory its IR should
+// have checked first, so the run ends as a wrong module, after what was
+// printed, never with a crash.
+program BadMem;
+
+type
+  PCell = ^Cell;
+  Cell = record
+    v: Int64;
+  end;
+
+begin
+  var p: PCell := nil;
+  writeln("before");
+  writeln(p.v);
+end BadMem.

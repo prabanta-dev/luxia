@@ -6,6 +6,9 @@
   it lets Meri handle the faults of a run, so an access the IR left
   unchecked (`--suppress=nil_check,dangling_check`) ends as a wrong
   module, not as a report of the sanitizer.
+- `tests/run/badmem`: a field read through nil with its checks off ends
+  as `luxia: wrong module: memory accessed with no check of nil`,
+  status 1, after what was printed, in every variant.
 - Overloading (§ 8.8): `overload`, routines told apart by the types of
   their parameters, a call to its only candidate (codes L0093-L0096,
   L0099, warning L0101), bodies found by their parameters, one name from
