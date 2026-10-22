@@ -407,6 +407,14 @@ static uint32_t routine(limba_lxp *P, bool heading)
         limba_lxp_type(P);
     }
     limba_lxp_expect(P, LX_SEMI, "after the heading");
+    bool overload = false;
+    if (lxp_kind(P) == LX_KW_OVERLOAD) {
+        /* routine f(...); overload; (§ 8.8) */
+        limba_lxp_next(P);
+        limba_lxp_expect(P, LX_SEMI, "after overload");
+        overload = true;
+    }
+    uint16_t of = overload ? LXN_F_OVERLOAD : 0;
     if (lxp_kind(P) == LX_KW_EXTERNAL) {
         /* external "library" [name "symbol"]; (§ 8.5) */
         limba_loc eloc = lxp_loc(P);
@@ -439,11 +447,13 @@ static uint32_t routine(limba_lxp *P, bool heading)
         uint32_t b = lxp_node(P, LXN_EXTERNAL, eloc, lib, sym, named, 0);
         uint32_t r = lxp_node(P, LXN_ROUTINE, loc, name, ps, result, b);
         P->t->node[r].op = (uint8_t)kind;
+        P->t->node[r].flags |= of;
         return r;
     }
     if (heading) {
         uint32_t r = lxp_node(P, LXN_ROUTINE, loc, name, ps, result, 0);
         P->t->node[r].op = (uint8_t)kind;
+        P->t->node[r].flags |= of;
         return r;
     }
     uint32_t locals = decls(P, LXP_LOCAL, 0);
@@ -457,6 +467,7 @@ static uint32_t routine(limba_lxp *P, bool heading)
     uint32_t b = lxp_node(P, LXN_BODY, bloc, locals, body, 0, 0);
     uint32_t r = lxp_node(P, LXN_ROUTINE, loc, name, ps, result, b);
     P->t->node[r].op = (uint8_t)kind;
+    P->t->node[r].flags |= of;
     return r;
 }
 

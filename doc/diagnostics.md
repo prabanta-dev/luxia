@@ -1886,6 +1886,123 @@ end.
 prog.luxia:5:12: error[L0092]: Grid takes all its indices in one [ ]: a[i, j]
 ```
 
+## Overloading
+
+### L0093 — OVERLOAD MISSING
+
+Every routine of a name given twice in a file says `overload` after its heading (§ 8.8); the error stands on the one that does not.
+
+```pascal
+program p;
+procedure Show(n: Int32); overload;
+begin
+end;
+procedure Show(s: String);
+begin
+end;
+begin
+end.
+```
+
+```
+prog.luxia:5:11: error[L0093]: 'Show' has another meaning here: write overload after the heading of each
+```
+
+### L0094 — ROUTINES NOT TOLD APART
+
+Two routines of one name are told apart by the types of their parameters, by position: neither modes, nor names, nor two subtypes of one type tell them apart (§ 8.8). The error stands on the second, with the number of arguments by position that would reach both.
+
+```pascal
+program p;
+procedure Put(n: Int32); overload;
+begin
+end;
+procedure Put(var n: Int32); overload;
+begin
+end;
+begin
+end.
+```
+
+```
+prog.luxia:5:11: error[L0094]: 'Put' cannot be told from another 'Put' when called with 1 argument: their parameters have the same types
+```
+
+### L0095 — NO ROUTINE TAKES THE ARGUMENTS
+
+No routine of the name takes the arguments of the call; notes list the routines of the name with their parameters (§ 8.8).
+
+```pascal
+program p;
+procedure Put(n: Int32); overload;
+begin
+end;
+procedure Put(s: String); overload;
+begin
+end;
+begin
+  Put(1.5);
+end.
+```
+
+```
+prog.luxia:9:3: error[L0095]: no 'Put' takes these arguments: there are 2
+```
+
+### L0096 — AMBIGUOUS CALL
+
+More than one routine of the name takes the arguments: a constant without a type goes to every type of its kind, and the type of the result never chooses (§ 8.8). Notes list the routines; a conversion gives the constant its type.
+
+```pascal
+program p;
+procedure Put(n: Int32); overload;
+begin
+end;
+procedure Put(n: Int64); overload;
+begin
+end;
+begin
+  Put(1);
+end.
+```
+
+```
+prog.luxia:9:3: error[L0096]: 'Put' is ambiguous here: 2 routines take these arguments; give a constant its type, as Int32(1)
+```
+
+### L0099 — OVERLOADED EXTERNAL WITHOUT A SYMBOL
+
+An external routine of a name with more meanings names its C symbol with `name`: the name as written would be the same symbol for each (§ 8.5, § 8.8).
+
+```pascal
+program p;
+procedure Emit(n: Int32); overload; external "c" name "out_int";
+procedure Emit(x: Float64); overload; external "c";
+begin
+end.
+```
+
+```
+prog.luxia:3:11: error[L0099]: 'Emit' has more meanings: give the C symbol with name "symbol"
+```
+
+### L0101 — OVERLOAD ALONE
+
+Warning: `overload` on a routine that joins no other of its name, in its file or in the units the file uses. A routine of an interface never gets it: it may join those of other units where it is used (§ 8.8).
+
+```pascal
+program p;
+procedure Show(n: Int32); overload;
+begin
+end;
+begin
+  Show(1);
+end.
+```
+
+```
+prog.luxia:2:11: warning[L0101]: 'Show' has no other meaning: overload is for a name with more
+```
 ## All the codes
 
 | Code | Name | Meaning |
@@ -1982,3 +2099,12 @@ prog.luxia:5:12: error[L0092]: Grid takes all its indices in one [ ]: a[i, j]
 | L0090 | NAMED_PLACE | an argument by name to a routine of the language or a conversion |
 | L0091 | DEFAULT_PLACE | a default value on a `var`, `out` or open array parameter, or not last |
 | L0092 | MULTI_INDEX | an array of more indices indexed in part, or `a[i][j]`; `a[i, j]` of an array of arrays; indices open and not open mixed; `low(a, k)` past its indices |
+| L0093 | OVERLOAD_MISSING | a routine without `overload` with the name of another one of its file |
+| L0094 | OVERLOAD_CLASH | two routines of one name that the same arguments by position reach |
+| L0095 | NO_MATCH | no routine of the name takes the arguments |
+| L0096 | AMBIGUOUS_CALL | more than one routine of the name takes the arguments |
+| L0097 | OPERATOR_FORM | an operator that cannot be defined, or in a form it does not take |
+| L0098 | OPERATOR_PLACE | an operator away from the types of its operands |
+| L0099 | OVERLOAD_EXTERNAL | an overloaded external routine without `name "symbol"` |
+| L0100 | STR_FORM | a `str` added in a form it does not take |
+| L0101 | LONE_OVERLOAD | warning: `overload` on a routine that joins no other |

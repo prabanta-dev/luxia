@@ -2,9 +2,14 @@
 
 ## Unreleased
 
-- The specification of overloading and of operators defined by a program
-  (§ 6.9, § 8.8; § 9.4 for `str`, § 11.2-11.3 for units; `overload` is
-  the 52nd keyword). Specified only: the compiler does not take them yet.
+- Overloading (§ 8.8): `overload`, routines told apart by the types of
+  their parameters, a call to its only candidate (codes L0093-L0096,
+  L0099, warning L0101), bodies found by their parameters, one name from
+  the routines of several units, a routine hiding only the one with its
+  parameters; in the IR the name of such a routine carries its
+  parameters. `overload` is now a keyword: a program that used it as a
+  name renames it. Operators defined by a program (§ 6.9) and `str` for
+  its types (§ 9.4) are specified, not yet compiled.
 - The specification (§ 9.1) says the sign of a negative real in fixed
   notation: `x:0:2` writes `-0.00` for −0.004 and for a negative zero,
   as the output already did; `tests/run/zero`.

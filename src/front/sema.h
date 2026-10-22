@@ -229,6 +229,16 @@ typedef struct {
     uint32_t *argmap;
     uint32_t *argpool;
     uint32_t nargpool, capargpool;
+    /* overloading (§ 8.8): per symbol the next routine of its name, 0
+       for the last (the first is the one a lookup finds); the bodies of
+       an implementation bound to their headings by profile once every
+       file is declared, ROUTINE nodes; per node, an argument already
+       checked while a call chose its routine */
+    limba_sym *ovl_next;
+    uint32_t novl;
+    uint32_t *ovl_pend;
+    uint32_t npend, cappend;
+    uint8_t *pre;
 } limba_lxs;
 
 void limba_lxs_init(limba_lxs *S, limba_lx_ast *t, limba_lx *lx,
@@ -306,6 +316,41 @@ static inline const limba_typeinfo *lxs_ty(const limba_lxs *S, limba_ltype t)
 bool lxs_pragma_is(limba_lxs *S, uint32_t node, const char *name);
 void lxs_c_pragma(limba_lxs *S, uint32_t node, uint32_t scope);
 void lxs_c_routine(limba_lxs *S, limba_sym s);
+
+/* overloading (sema_overload.c, § 8.8) */
+/* the next routine of the name of s, 0 if none */
+limba_sym lxs_ovl_next(const limba_lxs *S, limba_sym s);
+/* a routine of a declaration list: true if done here (another meaning of
+   a name, or a body bound later by its profile); *s the symbol, 0 if
+   none yet */
+bool lxs_ovl_declare(limba_lxs *S, uint32_t scope, uint32_t d, limba_sym *s);
+/* once every file is declared: the bodies bound by their profiles, the
+   word overload where it is needed */
+void lxs_ovl_bind(limba_lxs *S);
+/* once every routine is resolved: two of one name that the same
+   arguments by position reach (§ 8.8) */
+void lxs_ovl_check(limba_lxs *S);
+/* the routine of the name of s that the call node takes: s itself when
+   the name has one meaning; 0 when none or more than one (reported). The
+   arguments it checked are marked in pre */
+limba_sym lxs_ovl_choose(limba_lxs *S, uint32_t node, uint32_t scope,
+                         limba_sym s);
+/* can an argument of type at go to the open array parameter pt */
+bool lxs_open_fits(limba_lxs *S, limba_ltype at, limba_ltype pt);
+/* the types of the parameters of routine m, as messages say them:
+   (Int32, Float64) */
+const char *lxs_ovl_profile(limba_lxs *S, limba_sym m, char *buf, size_t cap);
+/* do routines a and b have parameters of the same types */
+bool lxs_ovl_homograph(limba_lxs *S, limba_sym a, limba_sym b);
+/* the interface symbols of name in the units the file of scope uses, and
+   the level of each (1 a unit of the program, 2 of the library); the
+   arrays are allocated */
+uint32_t lxs_unit_heads(limba_lxs *S, uint32_t scope, uint32_t name,
+                        limba_sym **heads, uint8_t **levels);
+/* the unit of s is named by the file of scope (§ 11.3) */
+void lxs_unit_named(limba_lxs *S, uint32_t scope, limba_sym s);
+/* is the routine s overloaded: overload written on it */
+bool lxs_ovl_is(const limba_lxs *S, limba_sym s);
 
 /* declarations and types (sema.c) */
 limba_sym lxs_lookup(limba_lxs *S, uint32_t scope, uint32_t node);

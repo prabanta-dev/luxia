@@ -1316,7 +1316,9 @@ procedure Show(v: Vector; width: Int32); overload;
   unit (interface and implementation together), that has the name of
   another one there; it stands right after the `;` of the heading,
   before `external` and before the declarations of the body. One alone
-  is a warning. Functions and procedures may share a name.
+  is a warning when it joins no other: a routine of an interface may join
+  those of other units in the files that use it (§ 11.3), and gets none.
+  Functions and procedures may share a name.
 - **Told apart by position**: two routines of one name are a
   compile-time error at the second if a number `k` of arguments by
   position goes to both (between their parameters without a default
@@ -1331,8 +1333,7 @@ procedure Show(v: Vector; width: Int32); overload;
   - an expression with a type, to a parameter of that type (its
     subtypes included); there are no implicit conversions;
   - a constant without a type, **by kind, not by value**: an integer to
-    every integer type, `BigInt` and the reals; a real to the reals; a
-    string to `String` (to `Char` too when it is one character); its
+    every integer type, `BigInt` and the reals; a real to the reals; its
     value is checked after the choice;
   - `nil` to every pointer; an aggregate to every record or array its
     components fit by form;

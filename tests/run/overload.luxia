@@ -1,0 +1,87 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+//
+// Routines of one name (specification § 8.8): chosen by the types of the
+// arguments, by position or by name, with default values; an aggregate
+// by its form; distinct types apart from their base; a function and a
+// procedure of one name; a call inside the arguments of another.
+program Routines;
+
+type
+  Money = new Int64;
+  Point = record x, y: Int32; end;
+  Row = array[Int32 range 1..3] of Int32;
+
+function Max(a, b: Int32): Int32; overload;
+begin
+  if a > b then
+    return a;
+  end;
+  return b;
+end Max;
+
+function Max(a, b: Float64): Float64; overload;
+begin
+  if a > b then
+    return a;
+  end;
+  return b;
+end Max;
+
+function Max(a, b: String): String; overload;
+begin
+  if a > b then
+    return a;
+  end;
+  return b;
+end Max;
+
+procedure Show(p: Point); overload;
+begin
+  writeln("point ", p.x, " ", p.y);
+end Show;
+
+procedure Show(r: Row; sep: String := ","); overload;
+begin
+  writeln("row ", r[1], sep, r[2], sep, r[3]);
+end Show;
+
+procedure Show(m: Money); overload;
+begin
+  writeln("money ", Int64(m));
+end Show;
+
+procedure Show(n: Int64); overload;
+begin
+  writeln("int ", n);
+end Show;
+
+function Twice(n: Int32): Int32; overload;
+begin
+  return n * 2;
+end Twice;
+
+procedure Twice(var n: Int64; times: Int64); overload;
+begin
+  n := n * 2 * times;
+end Twice;
+
+var
+  i: Int32 := 4;
+  f: Float64 := 2.5;
+  m: Money := 7;
+  n: Int64 := 3;
+
+begin
+  writeln(Max(i, Int32(9)), " ", Max(f, 1.0), " ", Max("pear", "apple"));
+  writeln(Max(Max(i, 2), Twice(Int32(5))));
+  Show({x: 1; y: 2});
+  Show({4, 5, 6});
+  Show({7, 8, 9}, sep => "-");
+  Show(r => {1, 1, 1}, sep => ";");
+  Show(m);
+  Show(n);
+  Show(Int64(Max(i, 1)));
+  Twice(n, 2);
+  writeln(n, " ", Twice(i));
+end.

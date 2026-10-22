@@ -303,6 +303,7 @@ void limba_lxs_init(limba_lxs *S, limba_lx_ast *t, limba_lx *lx,
     S->sym = limba_xcalloc(n, sizeof(*S->sym));
     S->val = limba_xcalloc(n, sizeof(*S->val));
     S->argmap = limba_xcalloc(n, sizeof(*S->argmap));
+    S->pre = limba_xcalloc(n, sizeof(*S->pre));
     lxs_value_new(S, 0); /* value 0: none */
     universe(S);
 #if defined(__aarch64__) && !defined(_WIN32)
@@ -323,6 +324,9 @@ void limba_lxs_free(limba_lxs *S)
     free(S->sym);
     free(S->val);
     free(S->argmap);
+    free(S->pre);
+    free(S->ovl_next);
+    free(S->ovl_pend);
     free(S->argpool);
     free(S->spelling);
     free(S->tconsts);
@@ -515,11 +519,15 @@ void lxs_declare_all(limba_lxs *S, uint32_t list, uint32_t scope, bool top)
                      top);
             break;
         }
-        case LXN_ROUTINE:
-            if (!bind_body(S, scope, d))
+        case LXN_ROUTINE: {
+            limba_sym s = 0;
+            if (lxs_ovl_declare(S, scope, d, &s))
+                mark(S, s, top);
+            else if (!bind_body(S, scope, d))
                 mark(S, lxs_declare(S, scope, x->a, LIMBA_LSYM_ROUTINE, d),
                      top);
             break;
+        }
         }
     }
 }
@@ -780,6 +788,8 @@ static void conform(limba_lxs *S, limba_sym s)
     char tb[128], tc[128], buf[400];
     if (hx->op != bx->op)
         why = "it is a procedure in one, a function in the other";
+    else if ((hx->flags ^ bx->flags) & LXN_F_OVERLOAD)
+        why = "overload is written in one of the two only";
     /* the parameters, name by name */
     uint32_t hl = hx->b, bl = bx->b, hi = 0, hk = 0, bi = 0, bk = 0;
     uint32_t intf = S->st.sym[s].scope;
@@ -1271,10 +1281,12 @@ void limba_lxs_check(limba_lxs *S)
             lxs_declare_all(S, part_decls(S, u, false), S->units[u].intf, true);
         lxs_declare_all(S, part_decls(S, u, true), S->units[u].impl, true);
     }
+    lxs_ovl_bind(S);
     for (uint32_t u = 0; u < nu; u++)
         for (int part = 0; part < 2; part++)
             if (part_decls(S, u, part == 1))
                 lxs_resolve_all(S, part_decls(S, u, part == 1));
+    lxs_ovl_check(S);
     /* every heading of an interface has its body (§ 11.2) */
     for (uint32_t u = 0; u < nu; u++) {
         uint32_t l = part_decls(S, u, false);
@@ -1286,8 +1298,12 @@ void limba_lxs_check(limba_lxs *S)
                 continue;
             size_t n;
             const char *sp = lxs_spell(S, S->sym[x->a], &n);
+            char prof[400] = "";
+            if (lxs_ovl_is(S, S->sym[x->a]))
+                lxs_ovl_profile(S, S->sym[x->a], prof, sizeof(prof));
             lxs_error(S, LXE_NO_BODY, x->a,
-                      "'%.*s' has no body in the implementation", (int)n, sp);
+                      "'%.*s%s' has no body in the implementation", (int)n, sp,
+                      prof);
         }
     }
     /* then the records with the C convention, before the routines of C

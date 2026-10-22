@@ -1394,7 +1394,7 @@ static bool ready_data(lxl *L, uint32_t d)
 /* the name in the IR of a symbol, interned */
 static limba_id ir_name(lxl *L, limba_sym s, const char *suffix)
 {
-    char buf[320];
+    char buf[1024];
     sym_text(L, s, suffix, buf, sizeof(buf));
     return limba_str_intern(L->m, buf, strlen(buf));
 }
@@ -1463,7 +1463,21 @@ static void declare(lxl *L, uint32_t decls, bool unreached)
             limba_sym s = S->sym[x->a];
             if (reached(L, s) == unreached)
                 continue;
-            limba_id name = ir_name(L, s, "");
+            /* a routine of a name with more meanings: the types of its
+               parameters after the name (§ 8.8) */
+            char prof[700] = "";
+            if (lxs_ovl_is(S, s)) {
+                const limba_typeinfo *ft = &S->ts.t[S->st.sym[s].type];
+                size_t at = (size_t)snprintf(prof, sizeof(prof), "(");
+                char tb[128];
+                for (uint32_t k = 0; k < ft->count && at < sizeof(prof); k++)
+                    at += (size_t)snprintf(
+                        prof + at, sizeof(prof) - at, "%s%s", k ? "," : "",
+                        lxs_tname(S, S->ts.param[ft->first + k].type, tb));
+                if (at < sizeof(prof))
+                    snprintf(prof + at, sizeof(prof) - at, ")");
+            }
+            limba_id name = ir_name(L, s, prof);
             if (lxl_external(L, s)) {
                 /* a routine of C: an extern of the module, its symbol
                    the name as written unless name gives it */

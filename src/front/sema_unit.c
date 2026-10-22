@@ -227,6 +227,13 @@ limba_sym lxs_find(limba_lxs *S, uint32_t scope, uint32_t name, uint32_t node)
     }
     if (!best)
         return s;
+    /* routines with overload from units of one level are one name: a
+       call chooses among them all (§ 8.8, § 11.3) */
+    bool merged = other && lxs_ovl_is(S, best) && lxs_ovl_is(S, other);
+    if (hidden && lxs_ovl_is(S, best) && lxs_ovl_is(S, hidden))
+        hidden = 0; /* only those with the same parameters: the call says */
+    if (merged)
+        other = 0;
     if (!node)
         return other ? 0 : best;
     mark_named(S, u, ub);
@@ -290,6 +297,45 @@ limba_sym lxs_qualified(limba_lxs *S, uint32_t scope, uint32_t unit,
                   (int)n, use, (int)na, a);
     }
     return s;
+}
+
+uint32_t lxs_unit_heads(limba_lxs *S, uint32_t scope, uint32_t name,
+                        limba_sym **heads, uint8_t **levels)
+{
+    *heads = NULL;
+    *levels = NULL;
+    if (!S->nunits)
+        return 0;
+    bool impl;
+    uint32_t u = lxs_unit_of(S, scope, &impl), n = 0, cap = 0, capl = 0;
+    for (uint32_t k = 0;; k++) {
+        uint32_t ref = visible_ref(S, u, impl, k);
+        if (!ref)
+            break;
+        uint32_t v = S->t->node[ref].b;
+        if (!v || !S->units[v - 1].intf)
+            continue;
+        v--;
+        limba_sym c = limba_sym_local(&S->st, S->units[v].intf, name);
+        if (!c)
+            continue;
+        uint32_t m = n;
+        LIMBA_GROW(*heads, n, cap);
+        LIMBA_GROW(*levels, m, capl);
+        (*heads)[n] = c;
+        (*levels)[n++] = S->units[v].library ? 2 : 1;
+    }
+    return n;
+}
+
+void lxs_unit_named(limba_lxs *S, uint32_t scope, limba_sym s)
+{
+    if (!S->nunits)
+        return;
+    bool impl;
+    uint32_t u = lxs_unit_of(S, scope, &impl);
+    uint32_t v = lxs_unit_of(S, S->st.sym[s].scope, &impl);
+    mark_named(S, u, v);
 }
 
 /* is the name declared at the level of a file, hiding a name of a unit
@@ -370,8 +416,20 @@ static void hides_check(limba_lxs *S)
                 if (!w || !S->units[w - 1].intf)
                     continue;
                 w--;
-                if (!limba_sym_local(&S->st, S->units[w].intf, x->a) ||
-                    hides_stated(S, u, w, x->a))
+                limba_sym c = limba_sym_local(&S->st, S->units[w].intf, x->a);
+                if (!c)
+                    continue;
+                /* a routine with overload hides only the one of its
+                   parameters: with the others it is one name (§ 11.3) */
+                if (lxs_ovl_is(S, s) && lxs_ovl_is(S, c)) {
+                    bool same = false;
+                    for (limba_sym m = c; m && !same; m = lxs_ovl_next(S, m))
+                        same = S->st.sym[m].scope == S->units[w].intf &&
+                               lxs_ovl_homograph(S, s, m);
+                    if (!same)
+                        continue;
+                }
+                if (hides_stated(S, u, w, x->a))
                     continue;
                 const char *a, *text = lxs_text_at(S, x->loc);
                 uint32_t na, n = lxs_ident_len(text);

@@ -74,6 +74,10 @@ uint32_t limba_scope_new(limba_symtab *st, uint32_t parent, uint32_t kind);
 limba_sym limba_sym_declare(limba_symtab *st, uint32_t scope, uint32_t name,
                             unsigned kind, limba_loc loc, uint32_t len,
                             limba_sym *dup);
+/* a new symbol no lookup finds: another meaning of a name that has one
+   already (an overloaded routine), reached through the first */
+limba_sym limba_sym_hidden(limba_symtab *st, uint32_t scope, uint32_t name,
+                           unsigned kind, limba_loc loc, uint32_t len);
 /* in scope only / in scope and its parents; 0 if not found */
 limba_sym limba_sym_local(const limba_symtab *st, uint32_t scope,
                           uint32_t name);

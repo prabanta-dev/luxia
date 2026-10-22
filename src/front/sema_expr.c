@@ -286,8 +286,6 @@ static limba_ltype compared_agg_type(limba_lxs *S, limba_ltype t)
     return t;
 }
 
-static bool open_fits(limba_lxs *S, limba_ltype at, limba_ltype pt);
-
 /* = and <> between records and arrays (§ 6.2): the same type, or an open
    operand and an array that could be passed to it; an aggregate (agg) has
    the type of the other operand, or one made for its own length */
@@ -310,7 +308,7 @@ static limba_ltype compare_whole(limba_lxs *S, uint32_t node, unsigned op,
          ((lxs_ty(S, lt)->flags | lxs_ty(S, rt)->flags) & LIMBA_TF_DYNAMIC))) {
         /* arrays of more indices: as many, of one base index by index,
            cells of one type */
-        ok = lm && rm && (open_fits(S, lt, rt) || open_fits(S, rt, lt));
+        ok = lm && rm && (lxs_open_fits(S, lt, rt) || lxs_open_fits(S, rt, lt));
     } else if (!ok && arrays &&
                (agg || lk == LIMBA_LTK_OPEN || rk == LIMBA_LTK_OPEN)) {
         const limba_typeinfo *x = lxs_ty(S, lt), *y = lxs_ty(S, rt);
@@ -786,7 +784,7 @@ static void check_format(limba_lxs *S, uint32_t list)
 
 /* an array of type at fits open parameter type pt: arrays both, index
    by index of one base (as many indices), elements compatible */
-static bool open_fits(limba_lxs *S, limba_ltype at, limba_ltype pt)
+bool lxs_open_fits(limba_lxs *S, limba_ltype at, limba_ltype pt)
 {
     const limba_typeinfo *a = lxs_ty(S, at), *p = lxs_ty(S, pt);
     if (a->kind != LIMBA_LTK_ARRAY && a->kind != LIMBA_LTK_OPEN)
@@ -797,8 +795,18 @@ static bool open_fits(limba_lxs *S, limba_ltype at, limba_ltype pt)
     if (am != pm)
         return false;
     if (pm)
-        return open_fits(S, a->elem, p->elem);
+        return lxs_open_fits(S, a->elem, p->elem);
     return lxs_compatible(S, a->elem, p->elem);
+}
+
+/* an argument, checked already if the call chose among routines of one
+   name (§ 8.8) */
+static limba_ltype arg_expr(limba_lxs *S, uint32_t a, uint32_t scope,
+                            limba_ltype expected)
+{
+    if (S->pre[a])
+        return S->type[a];
+    return lxs_expr(S, a, scope, expected);
 }
 
 /* an argument a of a routine for parameter p: its type, its mode */
@@ -810,8 +818,8 @@ static void routine_arg(limba_lxs *S, uint32_t a, uint32_t scope, limba_param p)
            index for an array of more; an aggregate takes its bounds from
            the parameter (§ 6.8) */
         limba_ltype at =
-            lxs_expr(S, a, scope, lxs_node(S, a)->kind == LXN_AGG ? p.type : 0);
-        if (at && !open_fits(S, at, p.type))
+            arg_expr(S, a, scope, lxs_node(S, a)->kind == LXN_AGG ? p.type : 0);
+        if (at && !lxs_open_fits(S, at, p.type))
             lxs_error(S, LXE_TYPE_MISMATCH, a,
                       "this is %s, the parameter is %s", lxs_tname(S, at, ta),
                       lxs_tname(S, p.type, tb));
@@ -837,13 +845,13 @@ static void routine_arg(limba_lxs *S, uint32_t a, uint32_t scope, limba_param p)
             }
         }
     } else if (p.mode == LXS_IN) {
-        lxs_expr(S, a, scope, p.type);
+        arg_expr(S, a, scope, p.type);
         lxs_assign_to(S, a, p.type, "the parameter");
         pointer_arg(S, a, LXS_IN);
         return;
     } else {
         limba_ltype at =
-            lxs_expr(S, a, scope, lxs_node(S, a)->kind == LXN_AGG ? p.type : 0);
+            arg_expr(S, a, scope, lxs_node(S, a)->kind == LXN_AGG ? p.type : 0);
         if (at && !untyped(S, at) && !lxs_compatible(S, at, p.type))
             lxs_error(S, LXE_TYPE_MISMATCH, a,
                       "this is %s, the parameter is %s", lxs_tname(S, at, ta),
@@ -858,7 +866,7 @@ static void stray_arg(limba_lxs *S, uint32_t a, uint32_t scope)
 {
     if (lxs_node(S, a)->kind == LXN_NAMED)
         a = lxs_node(S, a)->b;
-    lxs_expr(S, a, scope, 0);
+    arg_expr(S, a, scope, 0);
 }
 
 /* a call of a routine of the program: the arguments by position first,
@@ -1575,9 +1583,18 @@ static limba_ltype call(limba_lxs *S, uint32_t node, uint32_t scope,
     switch (S->st.sym[s].kind) {
     case LIMBA_LSYM_TYPE:
         return conversion(S, node, scope, S->st.sym[s].type);
-    case LIMBA_LSYM_ROUTINE:
-        lxs_use(S, s, callee, false);
-        return routine_call(S, node, scope, s);
+    case LIMBA_LSYM_ROUTINE: {
+        /* the one of its name the arguments take (§ 8.8) */
+        limba_sym m = lxs_ovl_choose(S, node, scope, s);
+        if (!m)
+            return set(S, node, 0);
+        if (m != s) {
+            S->sym[callee] = m;
+            lxs_force(S, m);
+        }
+        lxs_use(S, m, callee, false);
+        return routine_call(S, node, scope, m);
+    }
     case LIMBA_LSYM_BUILTIN:
         return builtin(S, node, scope, s, expected);
     }

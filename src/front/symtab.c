@@ -118,3 +118,18 @@ limba_sym limba_sym_declare(limba_symtab *st, uint32_t scope, uint32_t name,
     st->gen[name]++; /* the answers about name are old */
     return s;
 }
+
+limba_sym limba_sym_hidden(limba_symtab *st, uint32_t scope, uint32_t name,
+                           unsigned kind, limba_loc loc, uint32_t len)
+{
+    LIMBA_GROW(st->sym, st->nsym, st->capsym);
+    limba_sym s = st->nsym++;
+    limba_symbol *y = &st->sym[s];
+    memset(y, 0, sizeof(*y));
+    y->kind = (uint8_t)kind;
+    y->name = name;
+    y->scope = scope;
+    y->loc = loc;
+    y->len = len;
+    return s;
+}

@@ -132,3 +132,21 @@ LX_ERROR(92, MULTI_INDEX)       /* an array of more indices indexed in
                                    part, or a[i][j]; a[i, j] of an array of
                                    arrays; indices open and not open
                                    mixed; low(a, k) past its indices */
+/* overloading and operators (Luxia 1, step 2) */
+LX_ERROR(93, OVERLOAD_MISSING)  /* a routine without overload that has the
+                                   name of another one of its file */
+LX_ERROR(94, OVERLOAD_CLASH)    /* two routines of one name that the same
+                                   arguments by position reach */
+LX_ERROR(95, NO_MATCH)          /* no routine of the name takes these
+                                   arguments */
+LX_ERROR(96, AMBIGUOUS_CALL)    /* more than one routine of the name takes
+                                   these arguments */
+LX_ERROR(97, OPERATOR_FORM)     /* an operator that cannot be defined, or
+                                   defined in a form it does not take */
+LX_ERROR(98, OPERATOR_PLACE)    /* an operator away from the types of its
+                                   operands */
+LX_ERROR(99, OVERLOAD_EXTERNAL) /* an overloaded external routine without
+                                   name "symbol" */
+LX_ERROR(100, STR_FORM)         /* a str added in a form it does not take */
+LX_ERROR(101, LONE_OVERLOAD)    /* warning: overload on a routine alone */
+

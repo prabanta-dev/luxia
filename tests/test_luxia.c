@@ -901,7 +901,49 @@ static const sema_case sema_cases[] =
         {"program p; type Gt = array[Int32 range 1..2, Int32 range 1..3] of Int32; var g: Gt; procedure q(m: array[Int32 range <>, Int64 range <>] of Int32); begin end; begin q(g); end.",
          "L0027@1:168"},
         {"program p; type Gt = array[Int32 range 1..2, Int32 range 1..3] of Int32; var g: Gt; procedure q(m: array[Int32 range <>, Int32 range 1..2] of Int32); begin end; begin end.",
-         "L0092@1:122"},
+         "L0092@1:122"},        /* overloading (Luxia 1, step 2) */
+        {"program p; function M(a, b: Int32): Int32; overload; begin return a; end; function M(a, b: Float64): Float64; overload; begin return a; end; var i: Int32 := 1; f: Float64 := 1.0; begin writeln(M(i, i), M(f, f), M(Int32(1), 2), M(1.5, 2.5)); end.",
+         ""},
+        {"program p; procedure Q(a: Int32); overload; begin end; procedure Q(a: Float64); begin end; begin end.",
+         "L0093@1:66 L0000@1:22"},
+        {"program p; procedure Q(a: Int32); begin end; procedure Q(a: Float64); overload; begin end; begin end.",
+         "L0093@1:22"},
+        {"program p; procedure Q(a: Int32); overload; begin end; procedure Q(var a: Int32); overload; begin end; begin end.",
+         "L0094@1:66 L0000@1:22"},
+        {"program p; type S = Int32 range 1..10; procedure Q(a: Int32); overload; begin end; procedure Q(a: S); overload; begin end; begin end.",
+         "L0094@1:94 L0000@1:50"},
+        {"program p; procedure Q(a: Int32); overload; begin end; procedure Q(a: Int32; b: Int32 := 0); overload; begin end; begin end.",
+         "L0094@1:66 L0000@1:22"},
+        {"program p; type M = new Int32; procedure Q(a: Int32); overload; begin writeln(1); end; procedure Q(a: M); overload; begin writeln(2); end; var mv: M := 1; begin Q(mv); Q(Int32(1)); end.",
+         ""},
+        {"program p; procedure Q(a: Int32); overload; begin end; procedure Q(a: Float64); overload; begin end; begin Q(\"s\"); end.",
+         "L0095@1:108 L0000@1:22 L0000@1:66"},
+        {"program p; procedure Q(a: Int32); overload; begin end; procedure Q(a: Int64); overload; begin end; begin Q(1); end.",
+         "L0096@1:106 L0000@1:22 L0000@1:66"},
+        {"program p; procedure Q(a: Int32; b: Int64); overload; begin end; procedure Q(b: Int64; a: Int32); overload; begin end; var x: Int32 := 1; y: Int64 := 2; begin Q(x, y); Q(y, x); Q(a => x, b => y); end.",
+         "L0096@1:178 L0000@1:22 L0000@1:76"},
+        {"program p; function M(a: Int32): Int32; overload; begin return a; end; function M(a: Float64): Float64; overload; begin return a; end; var f: Float64 := M(1); begin end.",
+         "L0096@1:154 L0000@1:21 L0000@1:81"},
+        {"program p; procedure Q(a: Int32); overload; external \"c\" name \"q1\"; procedure Q(a: Float64); overload; external \"c\"; begin end.",
+         "L0099@1:79"},
+        {"program p; procedure Lone(); overload; begin end; begin Lone(); end.",
+         "L0101@1:22"},
+        {"program p; type R = record x, y: Int32; end; type A = array[Int32 range 1..2] of Int32; procedure Q(r: R); overload; begin writeln(r.x); end; procedure Q(a: A); overload; begin writeln(a[2]); end; begin Q({x: 1; y: 2}); Q({3, 4}); end.",
+         ""},
+        {"program p; type R = record x: Int32; end; type P1 = ^R; P2 = ^Int32; procedure Q(a: P1); overload; begin end; procedure Q(a: P2); overload; begin end; begin Q(nil); end.",
+         "L0096@1:158 L0000@1:80 L0000@1:121"},
+        {"program p; function F(a: Int32): Int32; overload; begin return a; end; procedure F(a: Float64); overload; begin end; begin F(Int32(1)); F(1.5); end.",
+         "L0037@1:124"},
+        {"program p; procedure Q(a: array[Int32 range <>] of Int32); overload; begin end; procedure Q(a: array[Int32 range 1..3] of Int32); overload; begin end; begin end.",
+         "L0094@1:91 L0000@1:22"},
+        {"program p; procedure Q(a: array[Int32 range <>] of Int32); overload; begin end; procedure Q(a: array[Int64 range <>] of Int32); overload; begin end; var v: array[Int64 range 1..2] of Int32; begin Q(v); end.",
+         ""},
+        {"program p; procedure Q(a: Int32); overload; begin end; var Q: Int32; begin end.",
+         "L0023@1:60 L0000@1:22 L0101@1:22"},
+        {"program p; procedure Q(a: Int32); overload; begin end; procedure Q(a: Float64); overload; begin end; begin Q(x => 1); end.",
+         "L0095@1:108 L0000@1:22 L0000@1:66"},
+        {"program p; procedure Q(a: Int32); overload; begin end; procedure Q(a: Float64); overload; begin end; var u: Int64 := 1; begin Q(u); end.",
+         "L0095@1:127 L0000@1:22 L0000@1:66"},
 };
 
 static void check_string(const char *src, char **errors)
@@ -2651,6 +2693,49 @@ static const unit_case unit_cases[] = {
      "",
      "errors",
      "L0069@g.luxia:6:10 n:@g.luxia:3:1 L0069@g.luxia:7:10 n:@g.luxia:4:1"},
+    /* overloading across units (§ 8.8, § 11.3): one name from units of one
+       level and from the file; qualified, the routines of that unit; a
+       routine of an implementation seen only there; bodies found by
+       their parameters */
+    {{{"p.luxia",
+       "program P;\nuses Ua, Ub;\nfunction Up(n: Int64): Int64; overload;\nbegin\n  return n + 1;\nend Up;\nbegin\n  writeln(Up('x'), \" \", Up(\"s\"), \" \", Up(Int64(4)), \" \", Ub.Up(\"t\"), \" \", Twice(Int32(3)), \" \", Twice(1.5));\nend."},
+      {"ua.luxia",
+       "unit Ua;\ninterface\nfunction Up(c: Char): Char; overload;\nfunction Twice(a: Int32): Int32; overload;\nfunction Twice(a: Float64): Float64; overload;\nimplementation\nfunction Twice(a: Float64): Float64; overload;\nbegin\n  return a * 2.0;\nend Twice;\nfunction Twice(a: Int32): Int32; overload;\nbegin\n  return Twice(\"x\", a);\nend Twice;\nfunction Twice(s: String; a: Int32): Int32; overload;\nbegin\n  return a + a;\nend Twice;\nfunction Up(c: Char): Char; overload;\nbegin\n  return 'A';\nend Up;\nend Ua."},
+      {"ub.luxia",
+       "unit Ub;\ninterface\nfunction Up(s: String): String; overload;\nimplementation\nfunction Up(s: String): String; overload;\nbegin\n  return \"UP\" & s;\nend Up;\nend Ub."}},
+     "A UPs 5 UPt 6 3.0\n",
+     "ok",
+     ""},
+    /* the same parameters from two units: ambiguous where used; a
+       routine of an implementation is not seen outside; a routine of the
+       file with the parameters of one of a unit hides it, with a warning */
+    {{{"p.luxia",
+       "program P;\nuses Ua, Ub;\nfunction Same(x: Int64): Int64; overload;\nbegin\n  return x;\nend Same;\nbegin\n  writeln(Same(Int32(1)));\n  writeln(Twice(\"x\", Int32(1)));\nend."},
+      {"ua.luxia",
+       "unit Ua;\ninterface\nfunction Same(x: Int32): Int32; overload;\nfunction Twice(a: Int32): Int32; overload;\nimplementation\nfunction Same(x: Int32): Int32; overload;\nbegin\n  return 2;\nend Same;\nfunction Twice(a: Int32): Int32; overload;\nbegin\n  return a;\nend Twice;\nfunction Twice(s: String; a: Int32): Int32; overload;\nbegin\n  return a;\nend Twice;\nend Ua."},
+      {"ub.luxia",
+       "unit Ub;\ninterface\nfunction Same(x: Int32): Int32; overload;\nfunction Same(x: Int64): Int64; overload;\nimplementation\nfunction Same(x: Int32): Int32; overload;\nbegin\n  return 3;\nend Same;\nfunction Same(x: Int64): Int64; overload;\nbegin\n  return 4;\nend Same;\nend Ub."}},
+     "",
+     "errors",
+     "L0096@p.luxia:8:11 n:@ua.luxia:3:10 n:@ub.luxia:3:10 L0035@p.luxia:9:11 L0027@p.luxia:9:17 w:L0071@p.luxia:3:10"},
+    /* a heading without its body, named by its parameters; a body with
+       overload for a heading without it */
+    {{{"p.luxia",
+       "program P;\nuses Ua;\nbegin\n  writeln(F(Int32(1)));\nend."},
+      {"ua.luxia",
+       "unit Ua;\ninterface\nfunction F(a: Int32): Int32; overload;\nfunction F(a: Float64): Float64; overload;\nfunction G(a: Int32): Int32;\nimplementation\nfunction F(a: Int32): Int32; overload;\nbegin\n  return a;\nend F;\nfunction G(a: Int32): Int32; overload;\nbegin\n  return a;\nend G;\nend Ua."}},
+     "",
+     "errors",
+     "L0069@ua.luxia:11:10 n:@ua.luxia:5:1 L0068@ua.luxia:4:10"},
+    /* a routine of the file with the parameters of one of a unit hides
+       it, said with pragma hides; the others of the unit join it */
+    {{{"p.luxia",
+       "program P;\nuses Ua;\npragma hides(Ua.Up);\nfunction Up(c: Char): Char; overload;\nbegin\n  return 'p';\nend Up;\nbegin\n  writeln(Up('x'), \" \", Up(\"s\"), \" \", Ua.Up('x'));\nend."},
+      {"ua.luxia",
+       "unit Ua;\ninterface\nfunction Up(c: Char): Char; overload;\nfunction Up(s: String): String; overload;\nimplementation\nfunction Up(c: Char): Char; overload;\nbegin\n  return 'A';\nend Up;\nfunction Up(s: String): String; overload;\nbegin\n  return \"UP\";\nend Up;\nend Ua."}},
+     "p UP A\n",
+     "ok",
+     ""},
 };
 
 /* the reader of the files of a case */
