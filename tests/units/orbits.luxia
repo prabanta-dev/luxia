@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Maurizio Cammalleri
 //
 // A program with units (specification § 11): Geometry and Text are units
-// of the program, Strings one of the standard library (limba
+// of the program, Strings one of the standard library (luxia
 // --stdlib=tests/units/std). Names direct or qualified, a variable
 // of an interface read outside its unit, initialisations before the
 // program, in the order of what they use.

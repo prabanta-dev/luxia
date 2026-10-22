@@ -199,10 +199,9 @@ signed char probe_narrow_sc(int x)
 
 /* eight integers and nine doubles: past the registers of either kind */
 double probe_many(int64_t a, int64_t b, int64_t c, int64_t d, int64_t e,
-                  int64_t f, int64_t g, int64_t h, double p, double q,
-                  double r, double s, double t, double u, double v, double w,
-                  double x)
+                  int64_t f, int64_t g, int64_t h, double p, double q, double r,
+                  double s, double t, double u, double v, double w, double x)
 {
-    return (double)(a + b + c + d + e + f + g + h) + p + q + r + s + t + u +
-           v + w + x;
+    return (double)(a + b + c + d + e + f + g + h) + p + q + r + s + t + u + v +
+           w + x;
 }

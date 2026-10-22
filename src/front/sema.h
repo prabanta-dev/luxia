@@ -169,7 +169,7 @@ typedef struct {
     /* canonical spellings of the names of the language, by symbol */
     const char **spelling;
     uint32_t nspelling;
-    /* the checks turned off for the whole file from outside (limba
+    /* the checks turned off for the whole file from outside (luxia
        --suppress), LXS_CHECK_* bits; the pragmas add to them */
     unsigned suppress;
     /* p^ of an array created by new may be read here as a whole: the

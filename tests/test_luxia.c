@@ -1955,7 +1955,7 @@ static uint64_t env(const char *name, uint64_t def)
     return s && *s ? strtoull(s, NULL, 0) : def;
 }
 
-/* random programs (src/luxia/gen.c) print what their generator says, and
+/* random programs (src/front/gen.c) print what their generator says, and
    end where it says:
      LIMBA_LXGEN_SEEDS  how many seeds (default 200)
      LIMBA_LXGEN_FIRST  the first seed (default 1) */

@@ -1,9 +1,9 @@
-Prabanta is designed and written by
+Luxia is designed and written by
 
     Maurizio "camauri" Cammalleri
     https://github.com/camauri
 
-Copyright (C) 2026 Maurizio Cammalleri. Prabanta is free software under the
+Copyright (C) 2026 Maurizio Cammalleri. Luxia is free software under the
 GNU General Public License, version 3 or later: see LICENSE.
 
 
@@ -15,12 +15,15 @@ thirty years of work, Maurizio has designed embedded systems, industrial
 control software and high-performance web platforms, and has led technical
 teams as CTO and CIO.
 
-Prabanta joins two parts of a family of tools written in C with no
-dependencies beyond the C library (https://github.com/prabanta-dev):
+Luxia is part of Prabanta (https://github.com/prabanta-dev), a family of
+tools written in C with no dependencies beyond the C library:
 
-  - Limba, the front end of the compiler for Luxia, an extended Pascal
-    with the rigour of Ada (https://github.com/prabanta-dev/limba);
-  - Meri, the register-based virtual machine that runs it, with a
+  - Luxia, an extended Pascal with the rigour of Ada: the language, its
+    front end and the program luxia (https://github.com/prabanta-dev/luxia);
+  - Limba, what every language of the family shares: the intermediate
+    representation, its optimiser and a reference interpreter
+    (https://github.com/prabanta-dev/limba);
+  - Meri, the register-based virtual machine that runs the IR, with a
     bytecode compiler, ahead-of-time and just-in-time compilation
     (https://github.com/prabanta-dev/meri).
 
@@ -44,7 +47,7 @@ Writing: https://cammalleri.substack.com/
 Others
 ------
 
-prabanta contains the code of others that Limba and Meri contain, and
+luxia contains the code of others that Limba and Meri contain, and
 nothing more: their AUTHORS name it. Meri computes the integers of any
 size with mini-gmp, from GNU MP 6.3.0, contributed to the GNU project by
 Niels Möller, with additional functionalities and improvements by Marco

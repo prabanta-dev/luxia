@@ -2,8 +2,8 @@
    Copyright (C) 2026 Maurizio Cammalleri */
 /*
  * limba_luxia.h - the front end of Luxia as a library: a source in, the
- * IR out, a function at a time, as limba makes its .lir and as a program
- * that runs the IR in memory (prabanta) takes it.
+ * IR out, a function at a time, as luxia takes it to run it with Meri,
+ * or (--emit) to write its .lir.
  *
  * What a consumer may rely on:
  *

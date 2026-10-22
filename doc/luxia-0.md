@@ -544,7 +544,7 @@ constant takes its type.
 
 A constant expression of type `BigInt` is computed by the compiler like
 any other. A compiler may bound the size of the constants it computes
-(Limba: 16 384 bits); a larger one is a compile-time error.
+(`luxia`: 16 384 bits); a larger one is a compile-time error.
 
 The static operations are `+ - * /`, `**` with an integer exponent,
 comparisons, `abs`, conversions, and `low(T)`/`high(T)` of a discrete
@@ -1538,7 +1538,7 @@ A call of an external routine (§ 8.5) leaves the language:
 **Forbidding it.** `pragma restrictions(no_external)`, among the
 declarations of the program, makes every external routine, every C type
 by name, `CPointer`, `CString` and `pragma convention` a compile-time
-error in the program and in its units; the option `limba
+error in the program and in its units; the option `luxia
 --restrict=no_external` does the same without touching the source, as
 Ada's `Restrictions` for programs to be certified. Among the
 declarations of a unit, the pragma applies to that unit. The **standard

@@ -89,14 +89,11 @@ Some of its rules:
   works on arrays of bytes as Python does in C (`move`, `translate`,
   `reverse`, `occurrences`); an error of input or output is never
   ignored. Every error has a stable code
-  ([`doc/limba/diagnostics.md`](doc/limba/diagnostics.md)).
+  ([`doc/diagnostics.md`](doc/diagnostics.md)).
 - **Nine benchmarks from the Computer Language Benchmarks Game**, translated
   to Luxia, print the expected output: binary-trees, fannkuch-redux, fasta,
   k-nucleotide, mandelbrot, n-body, pidigits, reverse-complement and
-  spectral-norm ([`tests/luxia/benchmarks/`](tests/luxia/benchmarks/)).
-- **Speed of the front end**: about 1 µs per line of source without
-  optimisation, 1.7 µs with it (a file of 108 000 lines, one core).
-
+  spectral-norm ([`tests/benchmarks/`](tests/benchmarks/)).
 - **Speed of the front end**: about 1 µs per line of source without
   optimisation, 1.7 µs with it (a file of 108 000 lines, one core).
 

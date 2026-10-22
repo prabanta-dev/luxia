@@ -1,4 +1,4 @@
-# Limba — Diagnostics of Luxia 0 (draft)
+# Luxia — Diagnostics of Luxia 0 (draft)
 
 This document lists the diagnostics that `luxia` gives when it compiles a
 Luxia 0 source: every code, the rule it enforces, a minimal program that
@@ -1630,7 +1630,7 @@ prog.luxia:3:21: warning[L0078]: pragma hides: no declaration of the file hides 
 
 ### L0079 — ROUTINE OF C OF THE LIBRARY REACHED
 
-Under the program's `pragma restrictions(no_external)` (or `limba
+Under the program's `pragma restrictions(no_external)` (or `luxia
 --restrict=no_external`) the standard library may declare external
 routines, but the program may reach none of them (§ 10.4).
 

@@ -3,13 +3,13 @@
 `include/limba/limba_luxia.h` compiles a Luxia source into the IR of
 `include/limba/ir.h`, in memory, and gives it to a **consumer** one
 function at a time, as soon as each is complete. It is what a program
-that runs the IR without writing a `.lir` needs, such as a back end
-linked with Limba into a single executable; the `luxia` command is itself
-one such consumer, whose function callback writes the `.lir`.
+that runs the IR without writing a `.lir` needs: the `luxia` command is
+itself such a consumer, which gives each function to the engine of Meri,
+or with `--emit` writes it to the `.lir`.
 
 The name reads "the Luxia language": *limba* is Sardinian for language.
-Each language Limba compiles has its own header, `limba_<language>.h`,
-and its own prefix.
+Each language that makes the IR of Limba has its own header,
+`limba_<language>.h`, and its own prefix.
 
 ## Compiling
 
@@ -44,7 +44,7 @@ the consumer, and `*out` is `NULL`.
 | `LIMBA_LUXIA_OK` (0) | compiled |
 | `LIMBA_LUXIA_ERRORS` (1) | the source has errors, or cannot be read |
 | `LIMBA_LUXIA_OPTIONS` (2) | an option is not valid |
-| `LIMBA_LUXIA_INTERNAL` (3) | the IR made is not valid, or a pass broke it: a fault of Limba |
+| `LIMBA_LUXIA_INTERNAL` (3) | the IR made is not valid, or a pass broke it: a fault of the compiler |
 | `LIMBA_LUXIA_STOPPED` (4) | the consumer asked to stop |
 
 The numbers 0 to 3 are also the exit statuses of `luxia`.

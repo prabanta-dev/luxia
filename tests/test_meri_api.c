@@ -2,7 +2,7 @@
    Copyright (C) 2026 Maurizio Cammalleri */
 /*
  * test_meri_api - Meri as a library, through meri/meri.h only, fed by the front
- * end of Limba (limba/limba_luxia.h) as prabanta feeds it: a function at a
+ * end of Luxia (limba/limba_luxia.h) as luxia feeds it: a function at a
  * time, each body freed right after it is given. What runs so must print
  * what the same module, compiled whole, prints; end the same way, in the
  * same words; and the calls out of order must fail, not run.
@@ -22,7 +22,7 @@ static int failures, cases;
     do {                                                                       \
         if (!(c)) {                                                            \
             failures++;                                                        \
-            fprintf(stderr, "test_meri_api: line %d: ", __LINE__);                  \
+            fprintf(stderr, "test_meri_api: line %d: ", __LINE__);             \
             fprintf(stderr, __VA_ARGS__);                                      \
             fputc('\n', stderr);                                               \
         }                                                                      \

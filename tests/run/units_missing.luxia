@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Maurizio Cammalleri
 //
 // a unit of the program that is not in its directory, and no -I: the
-// error of limba, exit status 1, nothing runs.
+// error of luxia, exit status 1, nothing runs.
 program UnitsMissing;
 
 uses Shapes;

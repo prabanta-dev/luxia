@@ -5,12 +5,12 @@
  * must print and how it must end, (-i) the input it reads, (-a) its
  * command line, an argument a line:
  *   lx_gen SEED > prog.luxia;  lx_gen -i SEED > prog.in;  lx_gen -e SEED
- * or (-d) write into directory DIR the same program in two files, its
+ * or (-d) write into directory DIR the same program in several files, its
  * routines that name nothing of it in the unit Lib (specification § 11):
  *   lx_gen -d DIR SEED
  * DIR/prog/prog.luxia and DIR/prog/lib.luxia, DIR/std/ (the units of the
- * library, none yet), DIR/expected (as -e), DIR/input (as -i) and
- * DIR/args (as -a); the directories must exist or be creatable.
+ * library, if the program uses some), DIR/expected (as -e), DIR/input
+ * (as -i) and DIR/args (as -a); the directories must exist or be creatable.
  */
 #include "front/gen.h"
 
