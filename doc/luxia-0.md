@@ -1332,6 +1332,18 @@ same type; a constant without a type needs a conversion
 `sqrt(-1.0)` and `ln(-1.0)` are `nan`, `ln(0.0)` is `-inf`, as for `**`.
 `trunc`, `round` (half to even), `floor` and `ceil` keep a real (§ 6.6).
 
+**The same bits everywhere.** `sin`, `cos`, `tan`, `arctan`, `exp`, `ln`
+and the `**` of a real give the same bits wherever the program runs,
+whatever the engine (interpreter or compiled code) and the platform: the
+result depends on the argument alone, never on the C library or the
+processor (`sqrt`, `trunc`, `round`, `floor` and `ceil` are fixed to the
+bit by IEEE 754 already). A `Float32` argument is computed in `Float64`
+and the result rounded once to `Float32`. Between two versions of the
+implementation these results, those of `Float32` included, may change
+only to become better, and each such change is declared; the first is
+the move from the C library of the system to the library common to every
+engine.
+
 ### 9.7 Memory
 
 - `new(T)` creates an object of type `T` and returns a `^T`. `new(T)` is
