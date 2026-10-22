@@ -211,9 +211,16 @@ limba_id lxl_addr(lxl *L, uint32_t node);
 void lxl_agg_fill(lxl *L, uint32_t node, limba_id dst, limba_ltype t);
 void lxl_agg_fill_dyn(lxl *L, uint32_t node, limba_id p, limba_ltype t,
                       limba_id lo, limba_id hi);
+/* the constant (or aggregate of constants) vn of type t stored at p +
+   off; count elements of type et from p + off, each vn, in a loop */
+void lxl_put_at(lxl *L, limba_id p, uint64_t off, uint32_t vn, limba_ltype t);
+void lxl_put_run(lxl *L, limba_id p, uint64_t off, uint64_t count, uint32_t vn,
+                 limba_ltype et);
 /* the initial value init of type t, known before any code runs, as the
-   data of the n globals (lower_data.c): false, and nothing done, when it
-   cannot be (a BigInt other than 0, a component not constant, too large) */
+   data of the n globals (lower_data.c), with stores and loops in main for
+   what is not data (runs of one value, a BigInt other than 0, what lies
+   past a long run); false, and nothing done, when it cannot be (a
+   component not constant) */
 bool lxl_data(lxl *L, const limba_id *globals, uint32_t n, uint32_t init,
               limba_ltype t);
 void lxl_branch(lxl *L, uint32_t node, limba_id t, limba_id f);

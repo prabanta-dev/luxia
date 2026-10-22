@@ -1178,6 +1178,21 @@ void lxl_agg_fill_dyn(lxl *L, uint32_t node, limba_id p, limba_ltype t,
     agg_elems(L, node, p, t, lo, hi);
 }
 
+void lxl_put_at(lxl *L, limba_id p, uint64_t off, uint32_t vn, limba_ltype t)
+{
+    agg_put(L, vn, addr(L, p, lxl_iconst(L, LIMBA_T_I64, 0), 0, (int64_t)off),
+            t);
+}
+
+void lxl_put_run(lxl *L, limba_id p, uint64_t off, uint64_t count, uint32_t vn,
+                 limba_ltype et)
+{
+    limba_id b = addr(L, p, lxl_iconst(L, LIMBA_T_I64, 0), 0, (int64_t)off);
+    agg_run(L, b, et, lxl_iconst(L, LIMBA_T_I64, 0),
+            lxl_iconst(L, LIMBA_T_I64, (int64_t)count), agg_eval(L, vn, et),
+            NULL, 0, LIMBA_NONE, false);
+}
+
 limba_id lxl_addr(lxl *L, uint32_t node)
 {
     limba_lx_node *x = nd(L, node);
