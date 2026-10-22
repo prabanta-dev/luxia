@@ -8,8 +8,14 @@
   the routines of several units, a routine hiding only the one with its
   parameters; in the IR the name of such a routine carries its
   parameters. `overload` is now a keyword: a program that used it as a
-  name renames it. Operators defined by a program (§ 6.9) and `str` for
-  its types (§ 9.4) are specified, not yet compiled.
+  name renames it. `str` for the types of a program (§ 9.4) is
+  specified, not yet compiled.
+- Operators defined by a program (§ 6.9): `function "+"(a, b: Vec): Vec`,
+  unary and binary, with the type of an operand and valid wherever its
+  values are; one with the operands of the predefined operator hides it,
+  constants without a type keep the predefined one; `<>` is `not` of `=`;
+  the `=` a program defines composes in records and arrays. Codes L0097,
+  L0098.
 - The specification (§ 9.1) says the sign of a negative real in fixed
   notation: `x:0:2` writes `-0.00` for −0.004 and for a negative zero,
   as the output already did; `tests/run/zero`.
@@ -20,7 +26,8 @@
   of 256 bytes or more is one element written once with its count (a
   fill of version 8 of the IR), zeros are not written, and `main` stores
   only a BigInt other than 0 (and fills in a loop a run whose element
-  holds one). `lx_gen` gives half of the global records and arrays an
+  holds one); an element past 1 MiB is written element by element,
+  each with the fills of its own runs. `lx_gen` gives half of the global records and arrays an
   aggregate of literals and prints them first; its oracle computes the
   mathematical functions with Limba's library, the bits of every engine.
 - Arrays of more indices, `array[I, J] of T`, as in Ada (specification

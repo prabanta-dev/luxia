@@ -117,7 +117,7 @@ bool lxs_ovl_declare(limba_lxs *S, uint32_t scope, uint32_t d, limba_sym *out)
 
 /* two parameter types one argument could go to: the same type (its
    subtypes the same), or open arrays that take the same arguments */
-static bool same_param(limba_lxs *S, limba_ltype a, limba_ltype b)
+bool lxs_same_param(limba_lxs *S, limba_ltype a, limba_ltype b)
 {
     if (!a || !b)
         return false;
@@ -129,8 +129,8 @@ static bool same_param(limba_lxs *S, limba_ltype a, limba_ltype b)
 }
 
 /* the types of the parameters of routine node d, written in scope */
-static uint32_t node_params(limba_lxs *S, uint32_t d, uint32_t scope,
-                            limba_ltype **out)
+uint32_t lxs_node_params(limba_lxs *S, uint32_t d, uint32_t scope,
+                         limba_ltype **out)
 {
     uint32_t plist = lxs_node(S, d)->b, n = 0, cap = 0;
     limba_ltype *ts = NULL;
@@ -157,16 +157,16 @@ void lxs_ovl_bind(limba_lxs *S)
         limba_sym h = limba_sym_local(&S->st, intf, lxs_node(S, x->a)->a),
                   found = 0;
         limba_ltype *bt = NULL;
-        uint32_t bn = node_params(S, d, scope, &bt);
+        uint32_t bn = lxs_node_params(S, d, scope, &bt);
         for (limba_sym m = h; m && !found; m = lxs_ovl_next(S, m)) {
             if (S->st.sym[m].scope != intf || lxs_heading(S, m) ||
                 lxs_node(S, S->st.sym[m].node)->d)
                 continue;
             limba_ltype *ht = NULL;
-            uint32_t hn = node_params(S, S->st.sym[m].node, intf, &ht);
+            uint32_t hn = lxs_node_params(S, S->st.sym[m].node, intf, &ht);
             bool same = hn == bn;
             for (uint32_t k = 0; same && k < bn; k++)
-                same = same_param(S, ht[k], bt[k]);
+                same = lxs_same_param(S, ht[k], bt[k]);
             free(ht);
             if (same)
                 found = m;
@@ -221,8 +221,8 @@ static bool clash(limba_lxs *S, limba_sym a, limba_sym b, uint32_t *k)
     if (kmin > kmax)
         return false;
     for (uint32_t i = 0; i < kmin; i++)
-        if (!same_param(S, S->ts.param[ta->first + i].type,
-                        S->ts.param[tb->first + i].type))
+        if (!lxs_same_param(S, S->ts.param[ta->first + i].type,
+                            S->ts.param[tb->first + i].type))
             return false;
     *k = kmin;
     return true;
@@ -260,7 +260,7 @@ void lxs_ovl_check(limba_lxs *S)
         if (inner[h] || S->st.sym[h].kind != LIMBA_LSYM_ROUTINE)
             continue;
         if (!lxs_ovl_next(S, h)) {
-            if (lxs_ovl_is(S, h) && !joins(S, h)) {
+            if (lxs_ovl_is(S, h) && !lxs_op_is(S, h) && !joins(S, h)) {
                 uint32_t n;
                 const char *sp = name_text(S, h, &n);
                 limba_report_add(S->rep, LIMBA_WARNING, LXE_LONE_OVERLOAD,
@@ -331,7 +331,7 @@ static bool record_form(limba_lxs *S, uint32_t agg, limba_ltype t)
     return true;
 }
 
-static bool arg_fits(limba_lxs *S, uint32_t v, limba_param p)
+bool lxs_arg_fits(limba_lxs *S, uint32_t v, limba_param p)
 {
     unsigned pk = p.type ? lxs_ty(S, p.type)->kind : 0;
     if (!p.type)
@@ -402,7 +402,7 @@ static bool fits(limba_lxs *S, uint32_t node, limba_sym m)
             break;
         }
         given[j] = 1;
-        ok = arg_fits(S, v, S->ts.param[first + j]);
+        ok = lxs_arg_fits(S, v, S->ts.param[first + j]);
     }
     uint32_t req = required(S, m);
     for (uint32_t j = 0; ok && j < req; j++)
@@ -440,8 +440,8 @@ bool lxs_ovl_homograph(limba_lxs *S, limba_sym a, limba_sym b)
     if (ta->count != tb->count)
         return false;
     for (uint32_t i = 0; i < ta->count; i++)
-        if (!same_param(S, S->ts.param[ta->first + i].type,
-                        S->ts.param[tb->first + i].type))
+        if (!lxs_same_param(S, S->ts.param[ta->first + i].type,
+                            S->ts.param[tb->first + i].type))
             return false;
     return true;
 }

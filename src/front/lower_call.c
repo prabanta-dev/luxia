@@ -987,6 +987,49 @@ static void builtin(lxl *L, uint32_t node, unsigned id, limba_id *result)
     }
 }
 
+limba_id lxl_op_call(lxl *L, uint32_t node, limba_sym s, const uint32_t *args,
+                     uint32_t nargs_, bool negate)
+{
+    limba_lxs *S = L->S;
+    const limba_typeinfo *sig = ti(L, S->st.sym[s].type);
+    uint32_t first = sig->first;
+    bool agg = sig->elem != S->ts.void_ && !lxl_scalar(L, sig->elem);
+    uint32_t ops[2 * (1 + 2 * LXL_MAXDIMS) + 1], n = 0;
+    limba_id slot = LIMBA_NONE;
+    if (agg) {
+        slot = lxl_temp(L, sig->elem, node);
+        ops[n++] = slot;
+    }
+    /* the operands from the left, by value or by address as the
+       parameters of a routine (§ 6.9) */
+    for (uint32_t i = 0; i < nargs_ && i < sig->count; i++) {
+        uint32_t a = args[i];
+        limba_param p = S->ts.param[first + i];
+        if (ti(L, p.type)->kind == LIMBA_LTK_OPEN) {
+            limba_id v[1 + 2 * LXL_MAXDIMS];
+            open_arg(L, node, a, p.type, &v[0], &v[1], &v[2]);
+            uint32_t k = 1 + 2 * lxl_dims(L, p.type);
+            if (k > 3)
+                more_bounds(L, node, a, p.type, &v[3]);
+            for (uint32_t j = 0; j < k; j++)
+                ops[n++] = v[j];
+        } else if (!lxl_scalar(L, p.type)) {
+            ops[n++] = lxl_addr(L, a);
+        } else {
+            limba_id v = lxl_value(L, a);
+            lxl_at(L, node);
+            ops[n++] = lxl_coerce(L, v, S->type[a], p.type);
+        }
+    }
+    lxl_at(L, node);
+    limba_id rt =
+        sig->elem == S->ts.void_ || agg ? LIMBA_T_VOID : lxl_type(L, sig->elem);
+    limba_id r = lxl_emit(L, LIMBA_OP_CALL, rt, 0, L->func_of[s], 0, ops, n);
+    if (negate)
+        r = bin(L, LIMBA_OP_XOR, LIMBA_T_I1, r, lxl_iconst(L, LIMBA_T_I1, 1));
+    return agg ? slot : r;
+}
+
 void lxl_call(lxl *L, uint32_t node, limba_id *result)
 {
     limba_lxs *S = L->S;

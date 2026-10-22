@@ -354,6 +354,20 @@ static uint32_t params(limba_lxp *P)
 /* the optional name after the end of a routine or of the program */
 static void end_name(limba_lxp *P, uint32_t name)
 {
+    if (lxp_kind(P) == LX_STRING && (P->t->node[name].flags & LXN_F_OPNAME)) {
+        /* end "+"; the operator as written in the heading */
+        size_t n, dn;
+        const char *op =
+            limba_strtab_get(P->lx->strings, P->lx->tok[P->pos].val, &n);
+        const char *decl =
+            limba_strtab_get(P->lx->names, P->t->node[name].a, &dn);
+        if (dn != n + 2 || memcmp(decl + 1, op, n) != 0)
+            limba_lxp_error(P, LXE_END_NAME, P->pos,
+                            "this end closes %.*s: write that name or none",
+                            (int)dn, decl);
+        limba_lxp_next(P);
+        return;
+    }
     if (lxp_kind(P) != LX_IDENT)
         return;
     uint32_t id = P->t->node[name].a;
@@ -395,7 +409,27 @@ static uint32_t routine(limba_lxp *P, bool heading)
     limba_loc loc = lxp_loc(P);
     unsigned kind = lxp_kind(P);
     limba_lxp_next(P);
-    uint32_t name = limba_lxp_name(P);
+    uint32_t name;
+    if (lxp_kind(P) == LX_STRING) {
+        /* function "+"(...): an operator (§ 6.9), its name with the
+           quotes, which no identifier has */
+        const limba_lx_token *t = &P->lx->tok[P->pos];
+        size_t n;
+        const char *op = limba_strtab_get(P->lx->strings, t->val, &n);
+        char buf[16];
+        uint32_t id = 0;
+        if (n + 2 < sizeof(buf)) {
+            buf[0] = '"';
+            memcpy(buf + 1, op, n);
+            buf[n + 1] = '"';
+            id = limba_strtab_intern(P->lx->names, buf, n + 2);
+        }
+        name = lxp_node(P, LXN_NAME, t->loc, id, t->len, 0, 0);
+        P->t->node[name].flags |= LXN_F_OPNAME;
+        limba_lxp_next(P);
+    } else {
+        name = limba_lxp_name(P);
+    }
     uint32_t ps = params(P), result = 0;
     if (kind == LX_KW_FUNCTION) {
         limba_lxp_expect(P, LX_COLON, "and the type of the result");

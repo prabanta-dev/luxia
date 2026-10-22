@@ -1886,7 +1886,7 @@ end.
 prog.luxia:5:12: error[L0092]: Grid takes all its indices in one [ ]: a[i, j]
 ```
 
-## Overloading
+## Overloading and operators
 
 ### L0093 — OVERLOAD MISSING
 
@@ -1970,6 +1970,42 @@ end.
 prog.luxia:9:3: error[L0096]: 'Put' is ambiguous here: 2 routines take these arguments; give a constant its type, as Int32(1)
 ```
 
+### L0097 — OPERATOR IN A FORM IT DOES NOT TAKE
+
+An operator a program defines is a function named by an operator that can be defined (not `and`, `or`, `in`, `<>`), with the number of operands of its kind, no mode, no default value, no `overload`; a comparison gives a `Boolean` (§ 6.9).
+
+```pascal
+program p;
+type Vec = record x, y: Float64; end;
+function "and"(a, b: Vec): Vec;
+begin
+  return a;
+end;
+begin
+end.
+```
+
+```
+prog.luxia:3:10: error[L0097]: this operator cannot be defined (and, or, in and <> are not; <> is not of =)
+```
+
+### L0098 — OPERATOR AWAY FROM ITS TYPES
+
+An operator has an operand of a type of the program, and stands in the part of the file where the type of one of its operands is declared: the operators of the types of the language do not change (§ 6.9).
+
+```pascal
+program p;
+function "+"(a, b: Int32): Int32;
+begin
+  return a - b;
+end;
+begin
+end.
+```
+
+```
+prog.luxia:2:10: error[L0098]: "+" needs an operand of a type of the program: the types of the language keep their operators
+```
 ### L0099 — OVERLOADED EXTERNAL WITHOUT A SYMBOL
 
 An external routine of a name with more meanings names its C symbol with `name`: the name as written would be the same symbol for each (§ 8.5, § 8.8).

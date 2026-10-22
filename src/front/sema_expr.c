@@ -349,6 +349,7 @@ static limba_ltype compare_whole(limba_lxs *S, uint32_t node, unsigned op,
         cell = lxs_ty(S, cell)->elem;
         S->argmap[node] = limba_types_open(&S->ts, S->ty_int[3], cell);
     }
+    lxs_op_uses(S, composite(S, lt) ? lt : rt, node);
     LIMBA_GROW(S->eqs, S->neqs, S->capeqs);
     S->eqs[S->neqs++] = node;
     LIMBA_GROW(S->eqs, S->neqs, S->capeqs);
@@ -365,6 +366,77 @@ static limba_ltype compared(limba_lxs *S, uint32_t node, uint32_t scope,
     limba_ltype t = lxs_expr(S, node, scope, expected);
     S->open_ok = false;
     return t;
+}
+
+/* the type the operator of the language op would work in, for operands
+   of types lt and rt; 0 if it does not apply (§ 6.2) */
+static limba_ltype predefined(limba_lxs *S, unsigned op, limba_ltype lt,
+                              limba_ltype rt)
+{
+    if (!lt || !rt)
+        return 0;
+    limba_ltype t = untyped(S, lt) || lt == S->ts.nil ? rt : lt;
+    if (op == LX_POWER || op == LX_KW_SHL || op == LX_KW_SHR)
+        t = lt;
+    else if (!untyped(S, lt) && !untyped(S, rt) && lt != S->ts.nil &&
+             rt != S->ts.nil && !lxs_compatible(S, lt, rt))
+        return 0;
+    unsigned k = kind(S, t);
+    switch (op) {
+    case LX_POWER:
+        return is_numeric(S, lt) && is_int(S, rt) ? t : 0;
+    case LX_KW_SHL:
+    case LX_KW_SHR:
+        return is_modular(S, lt) ? t : 0;
+    case LX_AMP:
+        return (k == LIMBA_LTK_STRING || k == LIMBA_LTK_CHAR) ? t : 0;
+    case LX_KW_XOR:
+        return is_bool(S, t) || is_modular(S, t) ? t : 0;
+    case LX_SLASH:
+        return is_float(S, t) ? t : 0;
+    case LX_KW_DIV:
+    case LX_KW_MOD:
+    case LX_KW_REM:
+        return is_int(S, t) || is_big(S, t) ? t : 0;
+    case LX_PLUS:
+    case LX_MINUS:
+    case LX_STAR:
+        return is_numeric(S, t) ? t : 0;
+    case LX_EQ:
+    case LX_NE:
+        return t; /* every type has its = (§ 6.2) */
+    case LX_LT:
+    case LX_LE:
+    case LX_GT:
+    case LX_GE:
+        return composite(S, t) || k == LIMBA_LTK_POINTER ||
+                       k == LIMBA_LTK_OPAQUE || k == LIMBA_LTK_NIL
+                   ? 0
+                   : t;
+    }
+    return 0;
+}
+
+/* an operator a program defined, chosen for node: its call, checked as
+   one (§ 6.9) */
+static limba_ltype defined_op(limba_lxs *S, uint32_t node, limba_sym m,
+                              const uint32_t *args, uint32_t n)
+{
+    lxs_force(S, m);
+    limba_ltype sig = S->st.sym[m].type;
+    const limba_typeinfo *ti = lxs_ty(S, sig);
+    for (uint32_t i = 0; i < n && i < ti->count; i++) {
+        limba_param p = S->ts.param[ti->first + i];
+        if (lxs_node(S, args[i])->kind != LXN_AGG &&
+            kind(S, p.type) != LIMBA_LTK_OPEN)
+            lxs_assign_to(S, args[i], p.type, "the operator");
+        pointer_arg(S, args[i], LXS_IN);
+    }
+    S->sym[node] = m;
+    lxs_use(S, m, node, false);
+    if (lxs_node(S, node)->op == LX_NE)
+        return set(S, node, S->ts.bool_);
+    return set(S, node, ti->elem);
 }
 
 static limba_ltype binary(limba_lxs *S, uint32_t node, uint32_t scope)
@@ -388,9 +460,29 @@ static limba_ltype binary(limba_lxs *S, uint32_t node, uint32_t scope)
     } else if (comparison(op)) {
         lt = compared(S, l, scope, 0);
         rt = compared(S, r, scope, 0);
+    } else if (S->nops && la != ra) {
+        /* an aggregate operand of an operator a program defined takes
+           the type of the other (§ 6.9) */
+        if (la) {
+            rt = lxs_expr(S, r, scope, 0);
+            lt = lxs_expr(S, l, scope, compared_agg_type(S, rt));
+        } else {
+            lt = lxs_expr(S, l, scope, 0);
+            rt = lxs_expr(S, r, scope, compared_agg_type(S, lt));
+        }
     } else {
         lt = lxs_expr(S, l, scope, 0);
         rt = lxs_expr(S, r, scope, 0);
+    }
+    if (S->nops && lt && rt) {
+        uint32_t args[2] = {l, r};
+        bool bad = false;
+        limba_sym m = lxs_op_choose(S, node, op, args, 2,
+                                    predefined(S, op, lt, rt), &bad);
+        if (bad)
+            return set(S, node, 0);
+        if (m)
+            return defined_op(S, node, m, args, 2);
     }
     if (comparison(op) && lt && rt && (composite(S, lt) || composite(S, rt)))
         return compare_whole(S, node, op, lt, rt, la || ra);
@@ -505,6 +597,16 @@ static limba_ltype unary(limba_lxs *S, uint32_t node, uint32_t scope)
     limba_ltype t = lxs_expr(S, e, scope, 0);
     if (!t)
         return set(S, node, 0);
+    if (S->nops) {
+        bool bad = false;
+        bool pre = op == LX_KW_NOT ? is_bool(S, t) || is_modular(S, t)
+                                   : is_numeric(S, t);
+        limba_sym m = lxs_op_choose(S, node, op, &e, 1, pre ? t : 0, &bad);
+        if (bad)
+            return set(S, node, 0);
+        if (m)
+            return defined_op(S, node, m, &e, 1);
+    }
     switch (op) {
     case LX_MINUS:
         if (!is_numeric(S, t))

@@ -1032,7 +1032,10 @@ function "<"(a, b: Money): Boolean;        // > does not
   position (§ 8.8) among the predefined operator, when it applies, and
   the operators declared with the types of the operands. A constant
   without a type goes to each type of its kind; an aggregate takes the
-  type of the other operand.
+  type of the other operand. An operator with the operands of the type
+  the predefined one works in hides it (`"+"(a, b: Money)` is the `+` of
+  `Money`); operands that are all constants without a type keep the
+  predefined operator, computed exactly (§ 4.2).
 - **The `=` of a type composes**: the `=` of records and arrays (§ 6.2)
   compares each component with the `=` of its type, the one a program
   defined if any, at any depth, also for elements of arrays and for

@@ -229,6 +229,10 @@ limba_id lxl_coerce(lxl *L, limba_id v, limba_ltype from, limba_ltype to);
 /* the assignment node: store value into target, the target first */
 void lxl_assign(lxl *L, uint32_t node, uint32_t target, uint32_t value);
 void lxl_call(lxl *L, uint32_t node, limba_id *result);
+/* a call of the operator s a program defined, its operands args (§ 6.9);
+   negate for <>: not of = */
+limba_id lxl_op_call(lxl *L, uint32_t node, limba_sym s, const uint32_t *args,
+                     uint32_t n, bool negate);
 /* the storage of a symbol, as a use in the current function */
 limba_id lxl_var_addr(lxl *L, limba_sym s);
 /* T(x) between numbers, and a range narrowing */

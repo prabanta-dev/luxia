@@ -30,6 +30,7 @@ enum {
 #define LXN_F_COMMA 16u    /* AGG: a ',' between components */
 #define LXN_F_CONST 32u    /* AGG: every component known at compile time */
 #define LXN_F_OVERLOAD 64u /* ROUTINE: overload after the heading */
+#define LXN_F_OPNAME 128u  /* NAME: an operator, "+": b the length written */
 
 typedef struct {
     uint8_t kind;

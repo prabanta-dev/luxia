@@ -1,0 +1,55 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+//
+// Operators defined by a program (specification § 6.9): + of records,
+// a unary minus, a mixed *, = of a distinct type that <> follows and
+// that the = of records and arrays composes, < of records; constants
+// without a type keep the operators of the language.
+program Operators;
+type
+  Vec = record x, y: Float64; end;
+  Money = new Int64;
+  Wallet = record owner: String; cash: Money; end;
+  Purse = array[Int32 range 1..3] of Money;
+function "+"(a, b: Vec): Vec;
+begin
+  return {x: a.x + b.x; y: a.y + b.y};
+end "+";
+function "-"(a: Vec): Vec;
+begin
+  return {x: -a.x; y: -a.y};
+end "-";
+function "*"(k: Float64; v: Vec): Vec;
+begin
+  return {x: k * v.x; y: k * v.y};
+end "*";
+function "="(a, b: Money): Boolean;
+begin
+  return Int64(a) div 10 = Int64(b) div 10;
+end "=";
+function "<"(a, b: Vec): Boolean;
+begin
+  return a.x < b.x;
+end "<";
+var
+  u: Vec := {x: 1.0; y: 2.0};
+  v: Vec := {x: 0.5; y: 0.5};
+  m1: Money := 12;
+  m2: Money := 17;
+  w1, w2: Wallet;
+  p1: Purse := {11, 22, 33};
+  p2: Purse := {19, 28, 37};
+begin
+  var s := u + v;
+  writeln(s.x, " ", s.y);
+  var t := -u;
+  var k := 2.0 * u;
+  writeln(t.x, " ", t.y, " ", k.y);
+  writeln(m1 = m2, " ", m1 <> m2, " ", Int64(m1 + m2));
+  writeln(u < v, " ", v < u, " ", 1 + 2);
+  w1 := {owner: "a"; cash: 41};
+  w2 := {owner: "a"; cash: 45};
+  writeln(w1 = w2, " ", p1 = p2, " ", p1 <> p2);
+  w2.cash := 51;
+  writeln(w1 = w2);
+end.

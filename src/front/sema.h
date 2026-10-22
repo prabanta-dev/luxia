@@ -239,6 +239,13 @@ typedef struct {
     uint32_t *ovl_pend;
     uint32_t npend, cappend;
     uint8_t *pre;
+    /* the operators of the program (§ 6.9): their symbols, the token
+       kind of each; the bodies to bind, (ROUTINE node, scope) pairs */
+    limba_sym *ops;
+    uint8_t *opk;
+    uint32_t nops, capops, capopk;
+    uint32_t *op_pend;
+    uint32_t nop_pend, capop_pend;
 } limba_lxs;
 
 void limba_lxs_init(limba_lxs *S, limba_lx_ast *t, limba_lx *lx,
@@ -349,6 +356,38 @@ uint32_t lxs_unit_heads(limba_lxs *S, uint32_t scope, uint32_t name,
                         limba_sym **heads, uint8_t **levels);
 /* the unit of s is named by the file of scope (§ 11.3) */
 void lxs_unit_named(limba_lxs *S, uint32_t scope, limba_sym s);
+/* the types of the parameters of routine node d written in scope, one
+   per name; *out allocated */
+uint32_t lxs_node_params(limba_lxs *S, uint32_t d, uint32_t scope,
+                         limba_ltype **out);
+/* one argument could go to parameters of the types a and b */
+bool lxs_same_param(limba_lxs *S, limba_ltype a, limba_ltype b);
+/* the argument v (checked, or an aggregate) goes to parameter p */
+bool lxs_arg_fits(limba_lxs *S, uint32_t v, limba_param p);
+
+/* operators defined by a program (sema_operator.c, § 6.9) */
+/* a routine named by an operator: declared (another symbol no lookup
+   finds), or a body bound later by its profile; false if the name is not
+   an operator's */
+bool lxs_op_declare(limba_lxs *S, uint32_t scope, uint32_t d, limba_sym *s);
+/* the bodies of an implementation for operators of the interface */
+void lxs_op_bind(limba_lxs *S);
+/* once resolved: the forms and places of the operators */
+void lxs_op_check(limba_lxs *S);
+/* is s an operator */
+bool lxs_op_is(const limba_lxs *S, limba_sym s);
+/* the operator defined for op (a token kind, = for <>) that the operands
+   take, 0 if none (the predefined one then); pt the type the predefined
+   operator would work in, 0 if it does not apply: a defined operator with
+   its operands of that type hides it. *bad when ambiguous (reported) */
+limba_sym lxs_op_choose(limba_lxs *S, uint32_t node, unsigned op,
+                        const uint32_t *args, uint32_t n, limba_ltype pt,
+                        bool *bad);
+/* the = a program defined for values of type t, 0 if none */
+limba_sym lxs_op_eq(limba_lxs *S, limba_ltype t);
+/* a whole comparison of type t calls the = of its components: their uses */
+void lxs_op_uses(limba_lxs *S, limba_ltype t, uint32_t node);
+
 /* is the routine s overloaded: overload written on it */
 bool lxs_ovl_is(const limba_lxs *S, limba_sym s);
 

@@ -327,6 +327,9 @@ void limba_lxs_free(limba_lxs *S)
     free(S->pre);
     free(S->ovl_next);
     free(S->ovl_pend);
+    free(S->ops);
+    free(S->opk);
+    free(S->op_pend);
     free(S->argpool);
     free(S->spelling);
     free(S->tconsts);
@@ -521,7 +524,8 @@ void lxs_declare_all(limba_lxs *S, uint32_t list, uint32_t scope, bool top)
         }
         case LXN_ROUTINE: {
             limba_sym s = 0;
-            if (lxs_ovl_declare(S, scope, d, &s))
+            if (lxs_op_declare(S, scope, d, &s) ||
+                lxs_ovl_declare(S, scope, d, &s))
                 mark(S, s, top);
             else if (!bind_body(S, scope, d))
                 mark(S, lxs_declare(S, scope, x->a, LIMBA_LSYM_ROUTINE, d),
@@ -1282,11 +1286,13 @@ void limba_lxs_check(limba_lxs *S)
         lxs_declare_all(S, part_decls(S, u, true), S->units[u].impl, true);
     }
     lxs_ovl_bind(S);
+    lxs_op_bind(S);
     for (uint32_t u = 0; u < nu; u++)
         for (int part = 0; part < 2; part++)
             if (part_decls(S, u, part == 1))
                 lxs_resolve_all(S, part_decls(S, u, part == 1));
     lxs_ovl_check(S);
+    lxs_op_check(S);
     /* every heading of an interface has its body (§ 11.2) */
     for (uint32_t u = 0; u < nu; u++) {
         uint32_t l = part_decls(S, u, false);

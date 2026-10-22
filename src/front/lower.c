@@ -752,7 +752,7 @@ static limba_sym bound_of(const lxl *L, uint32_t e, bool low)
     if (x->kind == LXN_REF && S->sym[e])
         return low ? L->store[S->sym[e]].lo_of : L->store[S->sym[e]].hi_of;
     if (x->kind == LXN_BINARY && x->op == (low ? LX_PLUS : LX_MINUS) &&
-        nd(L, x->a)->kind == LXN_REF && S->val[x->b]) {
+        !S->sym[e] && nd(L, x->a)->kind == LXN_REF && S->val[x->b]) {
         __int128 c;
         if (lxs_value_to_int(S, S->val[x->b], &c) && c >= 0)
             return bound_of(L, x->a, low);
@@ -1466,7 +1466,7 @@ static void declare(lxl *L, uint32_t decls, bool unreached)
             /* a routine of a name with more meanings: the types of its
                parameters after the name (§ 8.8) */
             char prof[700] = "";
-            if (lxs_ovl_is(S, s)) {
+            if (lxs_ovl_is(S, s) || lxs_op_is(S, s)) {
                 const limba_typeinfo *ft = &S->ts.t[S->st.sym[s].type];
                 size_t at = (size_t)snprintf(prof, sizeof(prof), "(");
                 char tb[128];

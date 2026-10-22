@@ -1228,6 +1228,13 @@ limba_id lxl_addr(lxl *L, uint32_t node)
         lxl_call(L, node, &r);
         return r;
     }
+    case LXN_BINARY:
+    case LXN_UNARY:
+        /* an operator the program defined, its result a record or an
+           array: the slot the call filled */
+        if (L->S->sym[node])
+            return lxl_value(L, node);
+        break;
     case LXN_AGG: {
         /* a value: computed whole in a slot of its own, then copied
            (§ 6.8) */
@@ -1446,6 +1453,32 @@ static limba_id valid(lxl *L, limba_id v, limba_ltype t)
    the right one, then the difference) */
 static void eq_component(lxl *L, limba_ltype t, limba_id a, limba_id b)
 {
+    limba_sym user = lxs_op_eq(L->S, t);
+    if (user) {
+        /* the = the program defined for t composes (§ 6.9, S29) */
+        limba_id va = a, vb = b;
+        if (lxl_scalar(L, t)) {
+            va = load(L, t, a);
+            if (narrow(L, t))
+                eq_ret_if(L,
+                          cmp(L, false, LIMBA_CC_EQ, valid(L, va, t),
+                              lxl_iconst(L, LIMBA_T_I1, 0)),
+                          EQ_BAD);
+            vb = load(L, t, b);
+            if (narrow(L, t))
+                eq_ret_if(L,
+                          cmp(L, false, LIMBA_CC_EQ, valid(L, vb, t),
+                              lxl_iconst(L, LIMBA_T_I1, 0)),
+                          EQ_BAD);
+        }
+        uint32_t o[2] = {va, vb};
+        limba_id same = lxl_emit(L, LIMBA_OP_CALL, LIMBA_T_I1, 0,
+                                 L->func_of[user], 0, o, 2);
+        eq_ret_if(
+            L, cmp(L, false, LIMBA_CC_EQ, same, lxl_iconst(L, LIMBA_T_I1, 0)),
+            EQ_DIFF);
+        return;
+    }
     if (is_whole(L, t)) {
         limba_id n = is_array(L, t)
                          ? lxl_iconst(L, LIMBA_T_I64, static_length(L, t))
@@ -1538,10 +1571,10 @@ static void eq_declare_all(lxl *L, limba_ltype t, limba_ltype **list,
     if (x->kind == LIMBA_LTK_RECORD) {
         for (uint32_t i = 0; i < x->count; i++) {
             limba_ltype ft = L->S->ts.field[x->first + i].type;
-            if (is_whole(L, ft))
+            if (is_whole(L, ft) && !lxs_op_eq(L->S, ft))
                 eq_declare_all(L, ft, list, n, cap);
         }
-    } else if (is_whole(L, x->elem)) {
+    } else if (is_whole(L, x->elem) && !lxs_op_eq(L->S, x->elem)) {
         eq_declare_all(L, x->elem, list, n, cap);
     }
     limba_id fid = lxl_eq_declare(L, t, eq_ftype(L, t));
@@ -1579,11 +1612,17 @@ static bool runs_code(lxl *L, uint32_t node)
     case LXN_CALL:
         return true;
     case LXN_BINARY:
+        if (L->S->sym[node])
+            return true; /* an operator of the program */
+        return runs_code(L, x->a) || runs_code(L, x->b);
     case LXN_INDEX:
         return runs_code(L, x->a) || runs_code(L, x->b);
     case LXN_IN:
         return runs_code(L, x->a) || runs_code(L, x->b) || runs_code(L, x->c);
     case LXN_UNARY:
+        if (L->S->sym[node])
+            return true;
+        return runs_code(L, x->a);
     case LXN_SEL:
     case LXN_DEREF:
         return runs_code(L, x->a);
@@ -1757,6 +1796,12 @@ static limba_id compare_whole(lxl *L, uint32_t node)
 
 static limba_id binary(lxl *L, uint32_t node)
 {
+    if (L->S->sym[node]) {
+        /* an operator the program defined (§ 6.9) */
+        uint32_t args[2] = {nd(L, node)->a, nd(L, node)->b};
+        return lxl_op_call(L, node, L->S->sym[node], args, 2,
+                           nd(L, node)->op == LX_NE);
+    }
     limba_lx_node *x = nd(L, node);
     unsigned op = x->op;
     uint32_t l = x->a, r = x->b;
@@ -1798,6 +1843,10 @@ static limba_id binary(lxl *L, uint32_t node)
 
 static limba_id unary(lxl *L, uint32_t node)
 {
+    if (L->S->sym[node]) {
+        uint32_t arg = nd(L, node)->a;
+        return lxl_op_call(L, node, L->S->sym[node], &arg, 1, false);
+    }
     limba_lx_node *x = nd(L, node);
     unsigned op = x->op;
     limba_ltype t = ntype(L, node);

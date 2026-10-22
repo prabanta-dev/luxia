@@ -944,6 +944,43 @@ static const sema_case sema_cases[] =
          "L0095@1:108 L0000@1:22 L0000@1:66"},
         {"program p; procedure Q(a: Int32); overload; begin end; procedure Q(a: Float64); overload; begin end; var u: Int64 := 1; begin Q(u); end.",
          "L0095@1:127 L0000@1:22 L0000@1:66"},
+        /* operators defined by a program (Luxia 1, step 2) */
+        {"program p; type V = record x: Int32; end; function \"+\"(a, b: V): V; begin return {x: a.x + b.x}; end; var u: V := {x: 1}; begin u := u + u; writeln(u.x); end.",
+         ""},
+        {"program p; type V = record x: Int32; end; function \"and\"(a, b: V): V; begin return a; end; begin end.",
+         "L0097@1:52"},
+        {"program p; type V = record x: Int32; end; function \"<>\"(a, b: V): Boolean; begin return true; end; begin end.",
+         "L0097@1:52"},
+        {"program p; type V = record x: Int32; end; procedure \"+\"(a, b: V); begin end; begin end.",
+         "L0097@1:53"},
+        {"program p; type V = record x: Int32; end; function \"*\"(a: V): V; begin return a; end; begin end.",
+         "L0097@1:52"},
+        {"program p; type V = record x: Int32; end; function \"not\"(a, b: V): V; begin return a; end; begin end.",
+         "L0097@1:52"},
+        {"program p; type V = record x: Int32; end; function \"+\"(var a: V; b: V): V; begin return a; end; begin end.",
+         "L0097@1:52"},
+        {"program p; type V = record x: Int32; end; function \"+\"(a: V; b: V := {x: 1}): V; begin return a; end; begin end.",
+         "L0097@1:52"},
+        {"program p; type V = record x: Int32; end; function \"<\"(a, b: V): Int32; begin return 1; end; begin end.",
+         "L0097@1:52"},
+        {"program p; function \"+\"(a, b: Int32): Int32; begin return 0; end; begin end.",
+         "L0098@1:21"},
+        {"program p; type V = record x: Int32; end; function \"+\"(a, b: V): V; overload; begin return a; end; begin end.",
+         "L0097@1:52"},
+        {"program p; type V = record x: Int32; end; function \"+\"(a, b: V): V; begin return a; end; function \"+\"(a, b: V): V; begin return b; end; begin end.",
+         "L0094@1:99 L0000@1:52"},
+        {"program p; type M = new Int64; function \"+\"(a, b: M): M; begin return M(Int64(a) * 2); end; var mv: M := 3; begin writeln(Int64(mv + mv), \" \", 1 + 2); end.",
+         ""},
+        {"program p; type M = new Int64; function \"*\"(a: M; b: Float64): M; begin return a; end; var mv: M := 3; begin writeln(Int64(mv * 2)); end.",
+         "L0096@1:127 L0000@1:41"},
+        {"program p; type V = record x: Int32; end; function \"=\"(a, b: V): Boolean; begin return true; end; var u, w: V; begin u := {x: 1}; w := {x: 2}; writeln(u = w, u <> w); end.",
+         ""},
+        {"program p; type V = record x: Int32; end; begin writeln({x: 1} < {x: 2}); end.",
+         "L0033@1:57 L0033@1:66"},
+        {"program p; type V = record x: Int32; end; function \"-\"(a: V): V; begin return {x: -a.x}; end; var u: V := {x: 4}; begin u := -u; writeln(u.x); end.",
+         ""},
+        {"program p; type V = record x: Int32; end; function \"+\"(a, b: V): V; begin return a; end; var u: V := {x: 1}; begin u := u + {x: 2}; writeln(u.x); end.",
+         ""},
 };
 
 static void check_string(const char *src, char **errors)
@@ -2736,6 +2773,27 @@ static const unit_case unit_cases[] = {
      "p UP A\n",
      "ok",
      ""},
+    /* operators of a unit: in its interface, their bodies found by their
+       parameters; they hold where the values are, in a file that does not
+       use the unit; <> is not of the = defined */
+    {{{"p.luxia",
+       "program P;\nuses Ub;\nbegin\n  writeln(Ub.Sum(Ub.Make(1) + Ub.Make(2)), \" \", Ub.Make(3) = Ub.Make(3), \" \", Ub.Make(3) <> Ub.Make(4));\nend.\n"},
+      {"ua.luxia",
+       "unit Ua;\ninterface\ntype\n  Vec = record x, y: Int32; end;\nfunction \"+\"(a, b: Vec): Vec;\nfunction \"=\"(a, b: Vec): Boolean;\nimplementation\nfunction \"=\"(a, b: Vec): Boolean;\nbegin\n  return a.x = b.x;\nend \"=\";\nfunction \"+\"(a, b: Vec): Vec;\nbegin\n  return {x: a.x + b.x; y: a.y + b.y};\nend \"+\";\nend Ua.\n"},
+      {"ub.luxia",
+       "unit Ub;\ninterface\nuses Ua;\nfunction Make(n: Int32): Vec;\nfunction Sum(v: Vec): Int32;\nimplementation\nfunction Make(n: Int32): Vec;\nbegin\n  return {x: n; y: n * 10};\nend Make;\nfunction Sum(v: Vec): Int32;\nbegin\n  return v.x + v.y;\nend Sum;\nend Ub.\n"}},
+     "33 true true\n",
+     "ok",
+     ""},
+    /* an operator away from the type of its operands: in the
+       implementation, for a type of the interface */
+    {{{"p.luxia",
+       "program P;\nuses Ua;\nvar a: Vec;\nbegin\n  a.x := 1;\n  writeln(a.x);\nend.\n"},
+      {"ua.luxia",
+       "unit Ua;\ninterface\ntype\n  Vec = record x: Int32; end;\nimplementation\nfunction \"-\"(a: Vec): Vec;\nbegin\n  return a;\nend \"-\";\nend Ua.\n"}},
+     "",
+     "errors",
+     "L0098@ua.luxia:6:10"},
 };
 
 /* the reader of the files of a case */
