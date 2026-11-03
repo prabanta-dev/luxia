@@ -385,6 +385,11 @@ typedef struct {
                         a literal, on the last parameters only */
     uint8_t np;
     uint32_t blk, nblk;
+    /* the variables its body names, and those of the routines it calls,
+       per variable (ntouch of them): an argument by address must not be
+       one of the globals among them (§ 8.1: an alias, L0102) */
+    uint8_t *touch;
+    uint32_t ntouch;
 } xr;
 
 typedef struct {
@@ -885,6 +890,52 @@ static uint32_t binop(G *g, unsigned op, uint32_t t, uint32_t a, uint32_t b)
 static bool in_function(const G *g)
 {
     return g->cur >= 0 && g->r[g->cur].func;
+}
+
+/* what routine id touches, from its body made from expression e0 and
+   statement s0 on: every variable a node names, and what the routines
+   it calls touch. Reads count too, and so does variable 0, which a node
+   without a variable seems to name: more than the truth, never less */
+static void touched(G *g, uint32_t id, uint32_t e0, uint32_t s0)
+{
+    xr *r = &g->r[id];
+    r->ntouch = g->nv;
+    r->touch = limba_xcalloc(g->nv + 1, 1);
+    for (uint32_t i = e0; i < g->ne; i++) {
+        if (g->e[i].var < g->nv)
+            r->touch[g->e[i].var] = 1;
+        if (g->e[i].k == E_CALL && g->e[i].fn != id) {
+            const xr *c = &g->r[g->e[i].fn];
+            for (uint32_t v = 0; v < c->ntouch; v++)
+                r->touch[v] |= c->touch[v];
+        }
+    }
+    for (uint32_t i = s0; i < g->ns; i++) {
+        if (g->st[i].var < g->nv)
+            r->touch[g->st[i].var] = 1;
+        if (g->st[i].k == S_CALL && g->st[i].fn != id) {
+            const xr *c = &g->r[g->st[i].fn];
+            for (uint32_t v = 0; v < c->ntouch; v++)
+                r->touch[v] |= c->touch[v];
+        }
+    }
+}
+
+static bool by_address(const G *g, uint32_t fn, uint32_t k);
+
+static bool touches(const G *g, uint32_t fn, uint32_t v)
+{
+    const xr *r = &g->r[fn];
+    return v < r->ntouch && r->touch[v];
+}
+
+/* parameter k of fn is passed by address: var, out, or a record or an
+   array without a mode (§ 8.1) */
+static bool by_address(const G *g, uint32_t fn, uint32_t k)
+{
+    const xv *p = &g->v[g->r[fn].par[k]];
+    return p->kind != V_IN || is_record(g, p->t) || is_array(g, p->t) ||
+           g->ty[p->t].k == K_OPEN;
 }
 
 static bool writable(const G *g, uint32_t v)
@@ -3789,6 +3840,22 @@ static uint32_t stmt(G *g, uint32_t *out)
                     a[k] = value_for(g, g->v[p].t, depth(g));
                 }
             }
+            /* no alias (§ 8.1): a variable given by address to two
+               parameters one of which changes it, or a global the
+               procedure touches */
+            for (uint32_t k = 0; k < g->r[fn].np && ok; k++) {
+                if (!by_address(g, fn, k) || !a[k] || g->e[a[k]].k != E_VAR)
+                    continue;
+                uint32_t v = g->e[a[k]].var;
+                if (g->v[v].kind == V_GLOBAL && touches(g, fn, v))
+                    ok = false;
+                for (uint32_t j = 0; j < k && ok; j++)
+                    if (by_address(g, fn, j) && a[j] && g->e[a[j]].k == E_VAR &&
+                        g->e[a[j]].var == v &&
+                        (g->v[g->r[fn].par[j]].kind != V_IN ||
+                         g->v[g->r[fn].par[k]].kind != V_IN))
+                        ok = false;
+            }
             if (ok) {
                 uint32_t order[4], w[4];
                 uint8_t npos;
@@ -3997,6 +4064,7 @@ static void routine(G *g)
         uint32_t e = lit(g, t, init_value(g, t));
         g->r[id].def[k] = e;
     }
+    uint32_t e0 = g->ne, s0 = g->ns;
     g->cur = (int)id;
     /* every out parameter is given a value first, from what is visible
        before it: reading it earlier is an error (L0053) */
@@ -4095,6 +4163,7 @@ static void routine(G *g)
     }
     g->r[id].blk = b;
     g->r[id].nblk = n;
+    touched(g, id, e0, s0);
     g->cur = -1;
     g->nscope = mark;
     if (outer) {
@@ -4174,6 +4243,7 @@ static void shaped(G *g, uint32_t t, uint8_t opk, uint8_t np, bool str)
         g->r[id].par[k] = p;
         show(g, p);
     }
+    uint32_t e0 = g->ne, s0 = g->ns;
     g->cur = (int)id;
     uint32_t n;
     uint32_t b = block(g, 1 + (int)below(g, 3), &n);
@@ -4201,6 +4271,7 @@ static void shaped(G *g, uint32_t t, uint8_t opk, uint8_t np, bool str)
     append(g, &b, &n, s, false);
     g->r[id].blk = b;
     g->r[id].nblk = n;
+    touched(g, id, e0, s0);
     g->cur = -1;
     g->nscope = mark;
 }
@@ -7250,6 +7321,8 @@ static void g_free(G *g)
     free(g->lab);
     free(g->ls);
     free(g->v);
+    for (uint32_t i = 0; i < g->nr; i++)
+        free(g->r[i].touch);
     free(g->r);
     free(g->mat);
     free(g->scope);

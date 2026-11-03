@@ -144,6 +144,15 @@ typedef struct {
     bool write;
 } limba_lxs_use;
 
+/* a variable of a file given by address to a routine (§ 8.1): an error
+   if the routine can write it, judged once every use is known */
+typedef struct {
+    uint32_t who; /* the caller, as in limba_lxs_use */
+    limba_sym routine;
+    limba_sym var;
+    uint32_t node; /* the argument */
+} limba_lxs_galias;
+
 typedef struct {
     limba_lx_ast *t;
     limba_lx *lx;
@@ -249,6 +258,9 @@ typedef struct {
     /* per node: the str a program added that writes the argument of
        write, writeln or str there (§ 9.1, § 9.4) */
     limba_sym *str_of;
+    /* the variables of a file given by address to a routine (§ 8.1) */
+    limba_lxs_galias *galias;
+    uint32_t ngalias, capgalias;
 } limba_lxs;
 
 void limba_lxs_init(limba_lxs *S, limba_lx_ast *t, limba_lx *lx,
@@ -259,6 +271,12 @@ void limba_lxs_free(limba_lxs *S);
 uint32_t lxs_call_arg(const limba_lxs *S, uint32_t call, uint32_t i);
 /* the whole program at t->root */
 void limba_lxs_check(limba_lxs *S);
+/* the arguments of a call of routine s (given[j] the node of parameter
+   j, 0 for a default value; pname[j] its name node): one object given
+   by two ways, one of which can change it (§ 8.1); a variable of a file
+   given by address is kept for lxs_unit_warnings */
+void lxs_alias_call(limba_lxs *S, limba_sym s, const uint32_t *given,
+                    const uint32_t *pname, uint32_t first, uint32_t count);
 
 /* a file of the program, for the driver before limba_lxs_check: its
    index (the first one added is units[0]) */

@@ -1,0 +1,4 @@
+--emit=lit
+-O0
+-o
+/dev/stdout

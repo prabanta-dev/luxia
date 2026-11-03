@@ -1102,6 +1102,7 @@ static limba_ltype routine_call(limba_lxs *S, uint32_t node, uint32_t scope,
             S->argpool[S->nargpool++] = v;
         }
     }
+    lxs_alias_call(S, s, given, pname, first, count);
     free(pnode);
     free(pname);
     free(given);

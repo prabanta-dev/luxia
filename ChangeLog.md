@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Aliasing (§ 8.1): a record or an array without a mode is always
+  passed by address; one object given to a routine by two ways, one of
+  which can change it, is an error where the text decides it (the same
+  variable, field or constant element to a `var` or `out` parameter and
+  another parameter by address; a variable of a file given by address
+  to a routine that can write it, through its calls), code L0102; with
+  indices computed at run time the call stands, and scalar `out`
+  parameters go back from the left. External routines and the routines
+  of the language are not judged. `lx_gen` writes no such call.
+- § 11.3: `nil` and an aggregate, too, may become ambiguous when a unit
+  adds a routine with `overload`. `tests/run/names` fixes the names in
+  the IR of routines of one name and of operators.
 - IR version 9 of Limba: the arithmetic of `UInt8`..`UInt64` uses the
   unsigned overflow operations of the IR (`uadd.ov`, `usub.ov`,
   `umul.ov`, trap 6) in place of its own checks; the sizes of pointers,

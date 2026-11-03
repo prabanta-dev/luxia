@@ -1158,7 +1158,7 @@ end;
 
 | Mode | Written | Meaning |
 |---|---|---|
-| in | no keyword | constant inside the routine; passed by copy or by reference at the compiler's choice, as in Ada; the argument may be an aggregate (§ 6.8) |
+| in | no keyword | constant inside the routine; a scalar is passed by copy, a record or an array **by address**; the argument may be an aggregate (§ 6.8) |
 | in out | `var` | read and written, by reference |
 | out | `out` | must be assigned before the routine returns |
 
@@ -1173,6 +1173,34 @@ end;
   the routine does not assign keeps the value it had before the call. If
   it had none, reading it is caught by the validity check on components
   without a value (§ 3.11).
+- A record or an array without a mode is **never copied**: the routine
+  reads the caller's object. Ada leaves the choice between copy and
+  reference to the compiler, and a program that sees the difference is
+  erroneous; Luxia fixes it, so every engine gives the same result.
+- **Aliasing.** A call where one object reaches the routine by two ways,
+  one of which can change it, is a compile-time error when the compiler
+  can tell from the text:
+  - the same variable, or a part of it, given to a `var` or `out`
+    parameter and to another `var` or `out` parameter, or to a record or
+    an array without a mode, of the same call: `P(a, a)`, `P(r, r.f)`,
+    `P(a[1], a[1])`, `Get(x, x)` with two `out`; the compiler tells by
+    names, fields and constant indices;
+  - a global variable, or a part of it, given to a `var` or `out`
+    parameter or as a record or an array without a mode to a routine
+    that can write that global, following the calls as the order of
+    initialisation does (§ 11.5).
+
+  Where it cannot tell, as with indices computed at run time
+  (`Swap(a[i], a[j])`), the call is allowed and its effect is the one
+  these rules define: records, arrays, `var` and `out` of records and
+  arrays work on the caller's object, and scalar `out` parameters go
+  back to their arguments **from left to right**, at each `return` and
+  at the end.
+- These rules are for the routines of the program and of its units.
+  An external routine works outside the language (§ 10.4): what C does
+  with one array given twice is the business of its documentation. The
+  routines of the language (§ 9) say what they do with the same object
+  given twice: `move` copies between ranges that may overlap (§ 9.5).
 
 ### 8.2 Results
 
@@ -1966,8 +1994,9 @@ end.
   never changes the meaning of a program and never stops it from
   compiling: at most it adds a warning. One case only stops it, never
   silently: a new routine with `overload` and other types of parameters
-  joins its name, and a call with a constant without a type that went
-  to one routine may now go to two, an ambiguity (§ 8.8).
+  joins its name, and a call with a constant without a type, `nil` or an
+  aggregate that went to one routine may now go to two, an ambiguity
+  (§ 8.8).
 - **A qualifier that names a used unit is always the unit.** If a used
   unit exports a name equal to another used unit (a variable `Text`
   while the file uses the unit `Text`), `Text.X` is `X` of the unit

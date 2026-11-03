@@ -1,0 +1,111 @@
+; Limba IR, version 9
+memory strict
+ptr_bits 64
+language "luxia"
+type %Vec = { i32 @0, i32 @4 } size 8 align 4
+global @u : %Vec = data "\x01\x00\x00\x00\x02"
+pos 1 "names.luxia" 9 3
+pos 2 "names.luxia" 9 8
+pos 3 "names.luxia" 9 17
+pos 4 "names.luxia" 10 3
+pos 5 "names.luxia" 15 3
+pos 6 "names.luxia" 15 8
+pos 7 "names.luxia" 15 17
+pos 8 "names.luxia" 16 3
+pos 9 "names.luxia" 21 3
+pos 10 "names.luxia" 21 15
+pos 11 "names.luxia" 21 21
+pos 12 "names.luxia" 21 18
+pos 13 "names.luxia" 21 29
+pos 14 "names.luxia" 21 35
+pos 15 "names.luxia" 21 32
+pos 16 "names.luxia" 26 3
+pos 17 "names.luxia" 26 10
+pos 18 "names.luxia" 27 3
+pos 19 "names.luxia" 27 11
+pos 20 "names.luxia" 27 34
+pos 21 "names.luxia" 27 55
+
+func @main : fn() -> void export {
+  slot 8 align 4
+b0:
+  v0 = gaddr ptr @u !16
+  v1 = slot ptr $0 !16
+  call void @"\"+\"(Vec,Vec)"(v1, v0, v0) !17
+  v2 = iconst i64 1 !16
+  v3 = iconst i64 8 !16
+  memcpy v0, v1, v3 !16
+  v4 = iconst i32 1 !18
+  v5 = iconst i32 2 !19
+  v6 = call i32 @"Max(Int32,Int32)"(v4, v5) !19
+  v7 = sext i64 v6 !19
+  call.rt void print_i64(v7) !19
+  v8 = sconst str " " !19
+  call.rt void print_str(v8) !19
+  v9 = fconst f64 0x1.8p+0 !19
+  v10 = fconst f64 0x1.4p+1 !20
+  v11 = call f64 @"Max(Float64,Float64)"(v9, v10) !20
+  call.rt void print_f64(v11) !20
+  call.rt void print_str(v8) !20
+  v12 = iconst i64 0 !21
+  v13 = addr ptr v0, v12, 0, 0 !21
+  v14 = load i32 v13 !21
+  v15 = sext i64 v14 !21
+  call.rt void print_i64(v15) !21
+  call.rt void print_nl() !21
+  ret
+}
+
+func @"Max(Int32,Int32)" : fn(i32, i32) -> i32 {
+b0(v0: i32, v1: i32):
+  v2 = icmp.sgt i1 v0, v1 !2
+  v3 = iconst i32 0 !4
+  v4 = iconst i32 0 !4
+  cbr v2, b2, b3
+b1:
+  ret v1
+b2:
+  ret v0
+b3:
+  br b1
+}
+
+func @"Max(Float64,Float64)" : fn(f64, f64) -> f64 {
+b0(v0: f64, v1: f64):
+  v2 = fcmp.ogt i1 v0, v1 !6
+  v3 = fconst f64 0x0p+0 !8
+  v4 = fconst f64 0x0p+0 !8
+  cbr v2, b2, b3
+b1:
+  ret v1
+b2:
+  ret v0
+b3:
+  br b1
+}
+
+func @"\"+\"(Vec,Vec)" : fn(ptr, ptr, ptr) -> void {
+  slot 8 align 4
+b0(v0: ptr, v1: ptr, v2: ptr):
+  v3 = slot ptr $0 !9
+  v4 = iconst i64 0 !9
+  v5 = addr ptr v3, v4, 0, 0 !9
+  v6 = addr ptr v1, v4, 0, 0 !10
+  v7 = load i32 v6 !10
+  v8 = addr ptr v2, v4, 0, 0 !11
+  v9 = load i32 v8 !11
+  v10 = add.ov i32 v7, v9 !12
+  store v10, v5 !12
+  v11 = addr ptr v3, v4, 0, 4 !12
+  v12 = addr ptr v1, v4, 0, 4 !13
+  v13 = load i32 v12 !13
+  v14 = addr ptr v2, v4, 0, 4 !14
+  v15 = load i32 v14 !14
+  v16 = add.ov i32 v13, v15 !15
+  store v16, v11 !15
+  v17 = iconst i64 1 !15
+  v18 = iconst i64 8 !15
+  memcpy v0, v3, v18 !15
+  v19 = iconst i1 0 !15
+  ret
+}

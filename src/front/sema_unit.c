@@ -979,6 +979,63 @@ static void library_c(limba_lxs *S, const uint32_t *first, uint32_t ns)
     }
 }
 
+/* a variable of a file given by address to a routine that can write
+   it, through its calls (§ 8.1): the routines of the calls kept by
+   lxs_alias_call, each walked once; seen[s] and wrote[s] hold the
+   number of the walk that met s */
+static int by_routine(const void *a, const void *b)
+{
+    const limba_lxs_galias *x = a, *y = b;
+    if (x->routine != y->routine)
+        return x->routine < y->routine ? -1 : 1;
+    return x->node < y->node ? -1 : x->node > y->node;
+}
+
+static void alias_globals(limba_lxs *S, const use_index *x)
+{
+    if (!S->ngalias)
+        return;
+    qsort(S->galias, S->ngalias, sizeof(*S->galias), by_routine);
+    uint32_t *seen = limba_xcalloc(x->ns, sizeof(*seen));
+    uint32_t *wrote = limba_xcalloc(x->ns, sizeof(*wrote));
+    limba_sym *todo = limba_xcalloc(S->nuses + 2, sizeof(*todo));
+    uint32_t walk = 0;
+    for (uint32_t i = 0; i < S->ngalias; i++) {
+        const limba_lxs_galias *g = &S->galias[i];
+        if (!i || g->routine != S->galias[i - 1].routine) {
+            walk++;
+            uint32_t n = 0;
+            todo[n++] = g->routine;
+            seen[g->routine] = walk;
+            while (n) {
+                uint32_t k = use_key(x, todo[--n]);
+                for (uint32_t j = x->off[k]; j < x->off[k + 1]; j++) {
+                    const limba_lxs_use *u = &S->uses[x->idx[j]];
+                    if (u->write)
+                        wrote[u->what] = walk;
+                    if (seen[u->what] == walk)
+                        continue;
+                    seen[u->what] = walk;
+                    if (S->st.sym[u->what].kind == LIMBA_LSYM_ROUTINE)
+                        todo[n++] = u->what;
+                }
+            }
+        }
+        if (wrote[g->var] != walk)
+            continue;
+        size_t vn, rn;
+        const char *vp = lxs_spell(S, g->var, &vn);
+        const char *rp = lxs_spell(S, g->routine, &rn);
+        lxs_error(S, LXE_ALIASED, g->node,
+                  "'%.*s' is given to '%.*s', which can also change it as a "
+                  "variable of its file: pass a copy",
+                  (int)vn, vp, (int)rn, rp);
+    }
+    free(seen);
+    free(wrote);
+    free(todo);
+}
+
 /* a pragma hides that hid nothing; a unit used and never named */
 void lxs_unit_warnings(limba_lxs *S)
 {
@@ -1011,6 +1068,7 @@ void lxs_unit_warnings(limba_lxs *S)
         }
     use_index ux;
     index_uses(S, &ux);
+    alias_globals(S, &ux);
     /* what the initialisations reach: the routines and variables kept */
     uint32_t ns = ux.ns;
     uint32_t *first = limba_xcalloc(ns, sizeof(*first));

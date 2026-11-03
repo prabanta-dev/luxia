@@ -2058,6 +2058,48 @@ end.
 ```
 prog.luxia:2:11: warning[L0101]: 'Show' has no other meaning: overload is for a name with more
 ```
+## Aliasing
+
+### L0102 — ALIASED ARGUMENTS
+
+One object reaches a routine by two ways, one of which can change it (§ 8.1): the same variable, or a part of it, given to a `var` or `out` parameter and to another `var` or `out` parameter or to a record or an array without a mode; or a global variable given so to a routine that can write it. Only what the text decides: with indices computed at run time the call is allowed.
+
+```pascal
+program p;
+type Pair = record a, b: Int32; end;
+procedure Swap(var x, y: Pair);
+var t: Pair;
+begin
+  t := x; x := y; y := t;
+end;
+var q: Pair := {a: 1; b: 2};
+begin
+  Swap(q, q);
+end.
+```
+
+```
+prog.luxia:10:11: error[L0102]: 'q' is given twice to 'Swap', which can change it through 'y': pass a copy
+```
+
+A variable of the file given so to a routine that can write it, itself or through the routines it calls:
+
+```pascal
+program p;
+type Pair = record a, b: Int32; end;
+var g: Pair := {a: 1; b: 2};
+procedure Touch(r: Pair);
+begin
+  g.a := r.b;
+end;
+begin
+  Touch(g);
+end.
+```
+
+```
+prog.luxia:9:9: error[L0102]: 'g' is given to 'Touch', which can also change it as a variable of its file: pass a copy
+```
 ## All the codes
 
 | Code | Name | Meaning |
@@ -2163,3 +2205,4 @@ prog.luxia:2:11: warning[L0101]: 'Show' has no other meaning: overload is for a 
 | L0099 | OVERLOAD_EXTERNAL | an overloaded external routine without `name "symbol"` |
 | L0100 | STR_FORM | a `str` added in a form it does not take |
 | L0101 | LONE_OVERLOAD | warning: `overload` on a routine that joins no other |
+| L0102 | ALIASED | one object given to a routine by two ways, one of which can change it |

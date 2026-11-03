@@ -1,0 +1,28 @@
+// The names in the IR of routines of one name and of an operator: the
+// types of the parameters after the name (written quoted in the text)
+program Names;
+
+type Vec = record x, y: Int32; end;
+
+function Max(a, b: Int32): Int32; overload;
+begin
+  if a > b then return a; end;
+  return b;
+end Max;
+
+function Max(a, b: Float64): Float64; overload;
+begin
+  if a > b then return a; end;
+  return b;
+end Max;
+
+function "+"(a, b: Vec): Vec;
+begin
+  return {x: a.x + b.x; y: a.y + b.y};
+end "+";
+
+var u: Vec := {x: 1; y: 2};
+begin
+  u := u + u;
+  writeln(Max(Int32(1), 2), " ", Max(1.5, 2.5), " ", u.x);
+end Names.

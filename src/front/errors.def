@@ -149,4 +149,6 @@ LX_ERROR(99, OVERLOAD_EXTERNAL) /* an overloaded external routine without
                                    name "symbol" */
 LX_ERROR(100, STR_FORM)         /* a str added in a form it does not take */
 LX_ERROR(101, LONE_OVERLOAD)    /* warning: overload on a routine alone */
+LX_ERROR(102, ALIASED)          /* one object given to a routine by two ways,
+                                   one of which can change it */
 
