@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+unit Ua;
+interface
+type TA = procedure();
+var ax: Int32;
+implementation
+
+procedure Local();
+begin
+  ax := ax + 1;
+end Local;
+var f: TA := Local;
+begin
+  ax := 2;
+  f();
+  writeln("ua ", ax);
+end Ua.

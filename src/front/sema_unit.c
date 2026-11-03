@@ -461,7 +461,8 @@ void lxs_use(limba_lxs *S, limba_sym what, uint32_t node, bool write)
         return;
     }
     LIMBA_GROW(S->uses, S->nuses, S->capuses);
-    S->uses[S->nuses++] = (limba_lxs_use){S->who, what, node, write, false};
+    S->uses[S->nuses++] =
+        (limba_lxs_use){S->who, what, node, write, false, 0, 0};
 }
 
 void lxs_use_taken(limba_lxs *S, limba_sym what, uint32_t node)
@@ -469,7 +470,8 @@ void lxs_use_taken(limba_lxs *S, limba_sym what, uint32_t node)
     if (!S->who || !what)
         return;
     LIMBA_GROW(S->uses, S->nuses, S->capuses);
-    S->uses[S->nuses++] = (limba_lxs_use){S->who, what, node, false, true};
+    S->uses[S->nuses++] =
+        (limba_lxs_use){S->who, what, node, false, true, 0, 0};
 }
 
 /* ---- before the names: Unit.Name, pragma hides ---- */
@@ -694,8 +696,6 @@ static void reach(limba_lxs *S, const use_index *x, uint32_t who,
             uint32_t i = x->idx[j];
             const limba_lxs_use *u = &S->uses[i];
             limba_sym s = u->what;
-            if (u->taken && wrote)
-                continue; /* the calls only: a value taken is no call */
             if (u->write && wrote)
                 wrote[s] = 1;
             if (first[s])
@@ -707,11 +707,42 @@ static void reach(limba_lxs *S, const use_index *x, uint32_t who,
     }
 }
 
-static void describe(limba_lxs *S, char *buf, size_t cap, uint32_t u,
-                     uint32_t v, limba_sym x, uint32_t use)
+/* the steps through calls of values on the way of use (+ 1) back to
+   an initialisation, first of what reaches each symbol: "through a value
+   of T, which may be R given at file:line:col" (§ 11.5) */
+static size_t via_steps(limba_lxs *S, char *buf, size_t cap,
+                        const uint32_t *first, uint32_t use)
 {
-    const char *a, *b, *c;
-    uint32_t na, nb, nc;
+    size_t at = 0;
+    for (int depth = 0; use && depth < 32 && at < cap; depth++) {
+        const limba_lxs_use *u = &S->uses[use - 1];
+        if (u->via) {
+            char tb[128];
+            size_t n;
+            const char *rp = lxs_spell(S, u->what, &n);
+            limba_where w = {0};
+            const char *file = "";
+            if (limba_source_where(S->src, S->t->node[u->via].loc, &w))
+                file = S->src->file[w.file].path;
+            at += (size_t)snprintf(buf + at, cap - at,
+                                   ", through a call of a value of %s, which "
+                                   "may be %.*s, given as a value at %s:%u:%u",
+                                   lxs_tname(S, u->ptype, tb), (int)n, rp, file,
+                                   w.line, w.col);
+        }
+        if (u->who & LXS_INIT)
+            break;
+        use = first[u->who];
+    }
+    return at;
+}
+
+static void describe(limba_lxs *S, char *buf, size_t cap, uint32_t u,
+                     uint32_t v, limba_sym x, uint32_t use,
+                     const uint32_t *first, const uint32_t *vfirst)
+{
+    const char *a, *b, *c, *d;
+    uint32_t na, nb, nc, nd;
     name_of(S, u, &a, &na);
     name_of(S, v, &b, &nb);
     if (!x) {
@@ -722,16 +753,40 @@ static void describe(limba_lxs *S, char *buf, size_t cap, uint32_t u,
     size_t n;
     c = lxs_spell(S, x, &n);
     nc = (uint32_t)n;
+    uint32_t xu = var_unit(S, x);
+    name_of(S, xu < S->nunits ? xu : v, &d, &nd);
     limba_where w = {0};
     const char *file = "";
     if (use &&
         limba_source_where(S->src, S->t->node[S->uses[use - 1].node].loc, &w))
         file = S->src->file[w.file].path;
+    char steps[400] = "", wsteps[600] = "";
+    via_steps(S, steps, sizeof(steps), first, use);
+    /* the write of the other, when a call through a value leads to it */
+    for (uint32_t i = 0; i < S->nuses; i++) {
+        const limba_lxs_use *k = &S->uses[i];
+        if (k->what != x || !k->write ||
+            !(k->who == (LXS_INIT | v) ||
+              (!(k->who & LXS_INIT) && vfirst[k->who])))
+            continue;
+        char st[400] = "";
+        if (k->who & LXS_INIT ||
+            !via_steps(S, st, sizeof(st), vfirst, vfirst[k->who]))
+            break;
+        limba_where ww = {0};
+        const char *wf = "";
+        if (limba_source_where(S->src, S->t->node[k->node].loc, &ww))
+            wf = S->src->file[ww.file].path;
+        snprintf(wsteps, sizeof(wsteps),
+                 "; that of %.*s can write it at %s:%u:%u%s", (int)nb, b, wf,
+                 ww.line, ww.col, st);
+        break;
+    }
     snprintf(buf, cap,
              "%.*s after %.*s (the initialisation of %.*s can reach "
-             "%.*s.%.*s at %s:%u:%u)",
-             (int)na, a, (int)nb, b, (int)na, a, (int)nb, b, (int)nc, c, file,
-             w.line, w.col);
+             "%.*s.%.*s at %s:%u:%u%s%s)",
+             (int)na, a, (int)nb, b, (int)na, a, (int)nd, d, (int)nc, c, file,
+             w.line, w.col, steps, wsteps);
 }
 
 static void init_order(limba_lxs *S, const use_index *ux)
@@ -843,13 +898,14 @@ static void init_order(limba_lxs *S, const use_index *ux)
             uint32_t from = 0;
             while (path[from] != u)
                 from++;
-            char msg[1024];
+            char msg[3000];
             size_t at = 0;
             for (uint32_t k = from; k < len && at < sizeof(msg) - 200; k++) {
                 uint32_t a = path[k], b = k + 1 < len ? path[k + 1] : u;
-                char part[400];
+                char part[1200];
                 limba_sym x = why[a * nu + b];
-                describe(S, part, sizeof(part), a, b, x, x ? first[a][x] : 0);
+                describe(S, part, sizeof(part), a, b, x, x ? first[a][x] : 0,
+                         first[a], first[b]);
                 at += (size_t)snprintf(msg + at, sizeof(msg) - at, "%s%s",
                                        k > from ? "; " : "", part);
             }
@@ -975,9 +1031,18 @@ static void library_c(limba_lxs *S, const uint32_t *first, uint32_t ns)
                 break;
             }
             sp = lxs_spell(S, who, &n);
-            if (at < sizeof(chain))
-                at += (size_t)snprintf(chain + at, sizeof(chain) - at,
-                                       ", called by %.*s", (int)n, sp);
+            if (at < sizeof(chain)) {
+                const limba_lxs_use *uu = &S->uses[use];
+                char tb[128];
+                if (uu->via)
+                    at += (size_t)snprintf(
+                        chain + at, sizeof(chain) - at,
+                        ", called by %.*s through a value of %s", (int)n, sp,
+                        lxs_tname(S, uu->ptype, tb));
+                else
+                    at += (size_t)snprintf(chain + at, sizeof(chain) - at,
+                                           ", called by %.*s", (int)n, sp);
+            }
             if (!first[who])
                 break;
             use = first[who] - 1;
@@ -1001,6 +1066,39 @@ static int by_routine(const void *a, const void *b)
     return x->node < y->node ? -1 : x->node > y->node;
 }
 
+/* the class of procedural type t: the types joined to it by the
+   conversions of the program (§ 11.5), its smallest member */
+static limba_ltype pclass(const limba_lxs *S, limba_ltype t)
+{
+    if (!S->npjoin)
+        return t;
+    limba_ltype *in = limba_xmalloc((S->npjoin + 1) * sizeof(*in));
+    uint32_t n = 0;
+    in[n++] = t;
+    for (bool grew = true; grew;) {
+        grew = false;
+        for (uint32_t i = 0; i + 1 < S->npjoin; i += 2)
+            for (int e = 0; e < 2; e++) {
+                limba_ltype a = S->pjoin[i + e], b = S->pjoin[i + 1 - e];
+                bool ha = false, hb = false;
+                for (uint32_t k = 0; k < n; k++) {
+                    ha = ha || in[k] == a;
+                    hb = hb || in[k] == b;
+                }
+                if (ha && !hb) {
+                    in[n++] = b;
+                    grew = true;
+                }
+            }
+    }
+    limba_ltype c = t;
+    for (uint32_t k = 0; k < n; k++)
+        if (in[k] < c)
+            c = in[k];
+    free(in);
+    return c;
+}
+
 /* a variable of routine g->host given by address to a routine nested
    in it that can write it, itself or through the nested routines of
    host it calls (§ 8.1, § 8.9) */
@@ -1015,8 +1113,7 @@ static void alias_captured(limba_lxs *S, const use_index *x,
         uint32_t k = use_key(x, todo[--n]);
         for (uint32_t j = x->off[k]; j < x->off[k + 1]; j++) {
             limba_sym m = S->uses[x->idx[j]].what;
-            if (S->uses[x->idx[j]].taken || seen[m] == walk ||
-                lxs_outer(S, m) != g->host)
+            if (seen[m] == walk || lxs_outer(S, m) != g->host)
                 continue;
             seen[m] = walk;
             todo[n++] = m;
@@ -1053,18 +1150,28 @@ static void alias_globals(limba_lxs *S, const use_index *x)
             alias_captured(S, x, g, seen, todo, ++walk);
             continue;
         }
-        if (!i || g->routine != S->galias[i - 1].routine ||
+        if (!g->routine || !i || g->routine != S->galias[i - 1].routine ||
             S->galias[i - 1].host) {
             walk++;
             uint32_t n = 0;
-            todo[n++] = g->routine;
-            seen[g->routine] = walk;
+            if (g->routine) {
+                todo[n++] = g->routine;
+                seen[g->routine] = walk;
+            } else {
+                /* a call through a value: every routine of its type */
+                limba_ltype c = pclass(S, g->via);
+                for (uint32_t t = 0; t < S->nptaken; t++) {
+                    limba_sym m = S->ptaken[t].routine;
+                    if (pclass(S, S->ptaken[t].type) == c && seen[m] != walk) {
+                        seen[m] = walk;
+                        todo[n++] = m;
+                    }
+                }
+            }
             while (n) {
                 uint32_t k = use_key(x, todo[--n]);
                 for (uint32_t j = x->off[k]; j < x->off[k + 1]; j++) {
                     const limba_lxs_use *u = &S->uses[x->idx[j]];
-                    if (u->taken)
-                        continue; /* no call */
                     if (u->write)
                         wrote[u->what] = walk;
                     if (seen[u->what] == walk)
@@ -1079,6 +1186,14 @@ static void alias_globals(limba_lxs *S, const use_index *x)
             continue;
         size_t vn, rn;
         const char *vp = lxs_spell(S, g->var, &vn);
+        if (!g->routine) {
+            char tb[128];
+            lxs_error(S, LXE_ALIASED, g->node,
+                      "'%.*s' is given to a value of %s, whose routines can "
+                      "also change it as a variable of its file: pass a copy",
+                      (int)vn, vp, lxs_tname(S, g->via, tb));
+            continue;
+        }
         const char *rp = lxs_spell(S, g->routine, &rn);
         lxs_error(S, LXE_ALIASED, g->node,
                   "'%.*s' is given to '%.*s', which can also change it as a "
@@ -1088,6 +1203,29 @@ static void alias_globals(limba_lxs *S, const use_index *x)
     free(seen);
     free(wrote);
     free(todo);
+}
+
+/* a call through a value of a procedural type T is a call of every
+   routine given as a value of T, or of a type joined to T by a
+   conversion (§ 11.5): a use of each, where the call is, with the place
+   where it is given */
+static void indirect_uses(limba_lxs *S)
+{
+    if (!S->nicalls || !S->nptaken)
+        return;
+    uint32_t n = S->nicalls;
+    for (uint32_t i = 0; i < n; i++) {
+        limba_lxs_icall c = S->icalls[i];
+        limba_ltype k = pclass(S, c.type);
+        for (uint32_t t = 0; t < S->nptaken; t++) {
+            limba_lxs_taken v = S->ptaken[t];
+            if (pclass(S, v.type) != k)
+                continue;
+            LIMBA_GROW(S->uses, S->nuses, S->capuses);
+            S->uses[S->nuses++] = (limba_lxs_use){
+                c.who, v.routine, c.node, false, false, v.node, c.type};
+        }
+    }
 }
 
 /* a pragma hides that hid nothing; a unit used and never named */
@@ -1120,6 +1258,7 @@ void lxs_unit_warnings(limba_lxs *S)
                                  "'%.*s' is used but never named", (int)na, a);
             }
         }
+    indirect_uses(S);
     use_index ux;
     index_uses(S, &ux);
     alias_globals(S, &ux);

@@ -337,6 +337,9 @@ void limba_lxs_free(limba_lxs *S)
     free(S->tconsts);
     free(S->eqs);
     free(S->galias);
+    free(S->ptaken);
+    free(S->icalls);
+    free(S->pjoin);
     lxs_unit_free(S);
     free(S->outer);
     free(S->caps);

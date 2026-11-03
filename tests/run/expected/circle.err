@@ -1,0 +1,3 @@
+tests/run/units/circle/ua.luxia:3:6: error[L0076]: the initialisations need each other: Ua after Ub (the initialisation of Ua can reach Ua.ax at tests/run/units/circle/ua.luxia:15:3; that of Ub can write it at tests/run/units/circle/ua.luxia:11:3, through a call of a value of TB, which may be Local, given as a value at tests/run/units/circle/ua.luxia:13:14); Ub after Ua (the initialisation of Ub can reach Ua.ax at tests/run/units/circle/ub.luxia:24:9); the constraint comes from the text, also from a branch that never runs: move the code
+ 3 | unit Ua;
+   |      ^~

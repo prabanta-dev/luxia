@@ -201,6 +201,8 @@ limba_ltype lxs_proc_value(limba_lxs *S, uint32_t node, uint32_t scope,
     }
     S->sym[node] = m;
     lxs_use_taken(S, m, node);
+    LIMBA_GROW(S->ptaken, S->nptaken, S->capptaken);
+    S->ptaken[S->nptaken++] = (limba_lxs_taken){expected, m, node};
     lxs_unit_named(S, scope, m);
     uint32_t v = lxs_value_new(S, LXV_FUNC);
     S->v[v].str = m;

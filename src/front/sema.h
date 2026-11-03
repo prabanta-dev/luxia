@@ -143,8 +143,27 @@ typedef struct {
     limba_sym what; /* a routine, or a variable of a unit or program */
     uint32_t node;  /* where */
     bool write;
-    bool taken; /* a routine given as a value (§ 3.15): reached, not called */
+    bool taken;   /* a routine given as a value: a call where it is
+                     given (§ 11.5) */
+    uint32_t via; /* a call through a value of procedural type ptype
+                     that may reach routine what: the node where what
+                     is given as a value; 0 for every other use */
+    limba_ltype ptype;
 } limba_lxs_use;
+
+/* a routine given as a value of procedural type type at node; a call
+   through a value of type type at node by who; a conversion between
+   procedural types a and b (§ 11.5) */
+typedef struct {
+    limba_ltype type;
+    limba_sym routine;
+    uint32_t node;
+} limba_lxs_taken;
+typedef struct {
+    uint32_t who;
+    limba_ltype type;
+    uint32_t node;
+} limba_lxs_icall;
 
 /* a variable of a file given by address to a routine (§ 8.1): an error
    if the routine can write it, judged once every use is known */
@@ -152,9 +171,11 @@ typedef struct {
     uint32_t who; /* the caller, as in limba_lxs_use */
     limba_sym routine;
     limba_sym var;
-    uint32_t node;  /* the argument */
-    limba_sym host; /* a variable of routine host given to a routine
-                       nested in it (§ 8.9); 0 for a variable of a file */
+    uint32_t node;   /* the argument */
+    limba_sym host;  /* a variable of routine host given to a routine
+                        nested in it (§ 8.9); 0 for a variable of a file */
+    limba_ltype via; /* routine 0: a call through a value of this
+                        procedural type (§ 3.15) */
 } limba_lxs_galias;
 
 /* a variable or a parameter of a routine read or written by a routine
@@ -275,6 +296,14 @@ typedef struct {
     /* the variables of a file given by address to a routine (§ 8.1) */
     limba_lxs_galias *galias;
     uint32_t ngalias, capgalias;
+    /* procedural values (§ 3.15, § 11.5): routines given as values, calls
+       through values, conversions between procedural types (pairs) */
+    limba_lxs_taken *ptaken;
+    uint32_t nptaken, capptaken;
+    limba_lxs_icall *icalls;
+    uint32_t nicalls, capicalls;
+    limba_ltype *pjoin;
+    uint32_t npjoin, cappjoin;
     /* nested routines (§ 8.9): per routine symbol the routine it is
        nested in (0: one of a file); the nested routine being checked
        (0: none); what the nested routines read and write of the
@@ -334,8 +363,8 @@ bool lxs_unit_declare(limba_lxs *S, uint32_t scope, uint32_t name_node);
 /* record what is being checked uses: a routine called, a variable of a
    file read or written */
 void lxs_use(limba_lxs *S, limba_sym what, uint32_t node, bool write);
-/* routine what given as a value at node (§ 3.15, § 11.5): reached with
-   who, not called by it */
+/* routine what given as a value at node (§ 3.15): a call of it by who
+   there, for what is reached and for the order (§ 11.5) */
 void lxs_use_taken(limba_lxs *S, limba_sym what, uint32_t node);
 /* the units: their scopes, names and declarations, bodies and
    initialisations; then the order of the initialisations */

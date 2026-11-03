@@ -1,0 +1,27 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+unit Ub;
+interface
+type TB = procedure();
+var bx: Int32;
+procedure Run(g: TB);
+function Get(): TB;
+implementation
+uses Ua;
+procedure RB();
+begin
+  bx := bx + 1;
+end RB;
+procedure Run(g: TB);
+begin
+  g();
+end Run;
+function Get(): TB;
+begin
+  return nil;
+end Get;
+begin
+  bx := ax;
+  Run(RB);
+  writeln("ub ", bx);
+end Ub.

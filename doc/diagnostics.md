@@ -1650,6 +1650,15 @@ end Right.
 left.luxia:1:6: error[L0076]: the initialisations need each other: Left after Right (the initialisation of Left can reach Right.b at left.luxia:7:14); Right after Left (the initialisation of Right can reach Left.a at right.luxia:7:13); the constraint comes from the text, also from a branch that never runs: move the code
 ```
 
+A call through a value of a procedural type may reach every routine given
+as a value of its type, or of a type joined to it by a conversion
+(§ 11.5); the message shows that step, with the place where the routine
+is given (`tests/run/circle`):
+
+```
+ua.luxia:1:6: error[L0076]: the initialisations need each other: Ua after Ub (the initialisation of Ua can reach Ua.ax at ua.luxia:13:3; that of Ub can write it at ua.luxia:9:3, through a call of a value of TB, which may be Local, given as a value at ua.luxia:11:14); Ub after Ua (the initialisation of Ub can reach Ua.ax at ub.luxia:22:9); the constraint comes from the text, also from a branch that never runs: move the code
+```
+
 ### L0077 — UNIT NEVER NAMED
 
 A warning: a unit used and never named in the file (§ 11.3).
@@ -1700,6 +1709,12 @@ end.
 
 ```
 prog.luxia:5:15: error[L0079]: pragma restrictions(no_external) forbids the boundary with C, which the library crosses here: the routine of C 'Connect', called by Open, reached from the program
+```
+
+The chain goes through the calls through values too (§ 10.4):
+
+```
+p.luxia:5:15: error[L0079]: pragma restrictions(no_external) forbids the boundary with C, which the library crosses here: the routine of C 'Connect', called by Open, called by Call through a value of TOp, reached from the program
 ```
 
 ### L0080 — UNIT OF THE PROGRAM WITH A NAME OF THE LIBRARY
@@ -2185,6 +2200,13 @@ end.
 
 ```
 prog.luxia:10:7: error[L0102]: 'rows' is given to 'Fix', which can also change it as a variable of 'Outer': pass a copy
+```
+
+A variable of the file given so to a call through a value, when a
+routine given as a value of its type can write it (§ 3.15, § 11.5):
+
+```
+prog.luxia:1:136: error[L0102]: 'g' is given to a value of TW, whose routines can also change it as a variable of its file: pass a copy
 ```
 
 ## Procedural types

@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+//
+// A circle of the initialisations that only a conversion between two
+// procedural types of one profile closes (§ 11.5): the message shows the
+// call through a value and where the routine is given
+program Circle;
+uses Ua, Ub;
+begin
+  writeln(ax, " ", bx, " ", TA(Get()) = nil);
+end Circle.

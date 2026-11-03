@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- § 11.5 and § 10.4 with procedural values: taking the value of a
+  routine counts as a call of it there (where a typed constant is
+  declared, for a constant); a call through a value of a type `T` is a
+  call of every routine given as a value of `T` or of a type joined to it
+  by a conversion; the circle of the initialisations and the chain of
+  `restrictions(no_external)` show that step. A variable of a file given
+  by address to a call through a value whose routines can write it is an
+  alias (L0102). `tests/run/circle`.
 - Procedural types (§ 3.15): `type Compare = function(a, b: Int32):
   Boolean;`, declared with a name only (L0106), types by name with a
   conversion between those of one profile (modes, types with their

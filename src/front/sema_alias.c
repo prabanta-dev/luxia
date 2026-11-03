@@ -139,12 +139,12 @@ void lxs_alias_call(limba_lxs *S, limba_sym s, const uint32_t *given,
         if (file_var(S, v)) {
             LIMBA_GROW(S->galias, S->ngalias, S->capgalias);
             S->galias[S->ngalias++] =
-                (limba_lxs_galias){S->who, s, v, given[j], 0};
+                (limba_lxs_galias){S->who, s, v, given[j], 0, 0};
         } else if (host && v && S->st.sym[v].scope == S->st.sym[host].value) {
             /* a variable of the routine s is nested in (§ 8.1, § 8.9) */
             LIMBA_GROW(S->galias, S->ngalias, S->capgalias);
             S->galias[S->ngalias++] =
-                (limba_lxs_galias){S->who, s, v, given[j], host};
+                (limba_lxs_galias){S->who, s, v, given[j], host, 0};
         }
         for (uint32_t i = 0; i < j; i++) {
             limba_param q = S->ts.param[first + i];
@@ -183,6 +183,13 @@ void lxs_alias_via(limba_lxs *S, limba_ltype via, const uint32_t *given)
         ns[j] = steps_of(S, given[j], st[j]);
         if (!ns[j])
             continue;
+        limba_sym v = S->sym[st[j][0]];
+        if (file_var(S, v)) {
+            /* judged with the routines of the type (§ 8.1, § 11.5) */
+            LIMBA_GROW(S->galias, S->ngalias, S->capgalias);
+            S->galias[S->ngalias++] =
+                (limba_lxs_galias){S->who, 0, v, given[j], 0, via};
+        }
         for (uint32_t i = 0; i < j; i++) {
             limba_param q = S->ts.param[first + i];
             if (!ns[i] || (p.mode == LXS_IN && q.mode == LXS_IN) ||

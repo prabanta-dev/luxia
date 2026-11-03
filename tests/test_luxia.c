@@ -1146,6 +1146,11 @@ static const sema_case sema_cases[] =
          "L0105@1:200"},
         {"program p; type TC = procedure(var a, b: Int32); procedure S(var a, b: Int32); begin a := b; end; var c: TC := S; x: Int32 := 1; begin c(x, x); end.",
          "L0102@1:141"},
+        /* a variable of the file given by address to a value whose routines can write it (§ 8.1, § 11.5) */
+        {"program p; type TW = procedure(var r: Int32); var g: Int32 := 0; procedure W(var r: Int32); begin g := r; end; var c: TW := W; begin c(g); end.",
+         "L0102@1:136"},
+        {"program p; type TW = procedure(var r: Int32); var g: Int32 := 0; h: Int32 := 0; procedure W(var r: Int32); begin h := r; end; var c: TW := W; begin c(g); end.",
+         ""},
         {"program p; var x: Int32 := 1; begin x(1); end.",
          "L0036@1:37"},
 };
@@ -3091,7 +3096,35 @@ static const unit_case unit_cases[] = {
        "unit Ops;\ninterface\ntype Binary = function(a, b: Int64): Int64;\nfunction Add(a, b: Int64): Int64;\nconst Mul: Binary = Times;\nimplementation\nfunction Add(a, b: Int64): Int64;\nbegin\n  return a + b;\nend Add;\nfunction Times(a, b: Int64): Int64;\nbegin\n  return a * b;\nend Times;\nend Ops.\n"}},
      "5 9 42 true\n",
      "ok",
+     ""},    /* calls through values reach the routines given as values of their
+       type (§ 11.5): two types of one profile keep two units apart, a
+       conversion joins them into a circle, which shows the step */
+    {{{"p.luxia",
+       "program P;\nuses Ua, Ub;\nbegin\n  writeln(ax, \" \", bx);\nend P.\n"},
+      {"ua.luxia",
+       "unit Ua;\ninterface\ntype TA = procedure();\nvar ax: Int32;\nimplementation\n\nprocedure Local();\nbegin\n  ax := ax + 1;\nend Local;\nvar f: TA := Local;\nbegin\n  ax := 2;\n  f();\n  writeln(\"ua \", ax);\nend Ua.\n"},
+      {"ub.luxia",
+       "unit Ub;\ninterface\ntype TB = procedure();\nvar bx: Int32;\nprocedure Run(g: TB);\nimplementation\nuses Ua;\nprocedure RB();\nbegin\n  bx := bx + 1;\nend RB;\nprocedure Run(g: TB);\nbegin\n  g();\nend Run;\nbegin\n  bx := ax;\n  Run(RB);\n  writeln(\"ub \", bx);\nend Ub.\n"}},
+     "ua 3\nub 4\n3 4\n",
+     "ok",
      ""},
+    {{{"p.luxia",
+       "program P;\nuses Ua, Ub;\nbegin\n  writeln(ax, \" \", bx, \" \", TA(Get()) = nil);\nend P.\n"},
+      {"ua.luxia",
+       "unit Ua;\ninterface\ntype TA = procedure();\nvar ax: Int32;\nimplementation\n\nprocedure Local();\nbegin\n  ax := ax + 1;\nend Local;\nvar f: TA := Local;\nbegin\n  ax := 2;\n  f();\n  writeln(\"ua \", ax);\nend Ua.\n"},
+      {"ub.luxia",
+       "unit Ub;\ninterface\ntype TB = procedure();\nvar bx: Int32;\nprocedure Run(g: TB);\nfunction Get(): TB;\nimplementation\nuses Ua;\nprocedure RB();\nbegin\n  bx := bx + 1;\nend RB;\nprocedure Run(g: TB);\nbegin\n  g();\nend Run;\nfunction Get(): TB;\nbegin\n  return nil;\nend Get;\nbegin\n  bx := ax;\n  Run(RB);\n  writeln(\"ub \", bx);\nend Ub.\n"}},
+     "",
+     "errors",
+     "L0076@ua.luxia:1:6"},
+    /* restrictions(no_external) through a call of a value (§ 10.4) */
+    {{{"p.luxia",
+       "program P;\nuses Net;\npragma restrictions(no_external);\nbegin\n  writeln(Net.Call(nil));\nend.\n"},
+      {"std/net.luxia",
+       "unit Net;\ninterface\ntype TOp = function(): Int64;\nfunction Call(f: TOp): Int64;\nfunction Never(): TOp;\nimplementation\nfunction Connect(n: CInt): CInt; external \"c\" name \"abs\";\nfunction Open(): Int64; begin return Int64(Connect(CInt(-3))); end;\nfunction Never(): TOp; begin return Open; end;\nfunction Call(f: TOp): Int64; begin return f(); end;\nend Net.\n"}},
+     "",
+     "errors",
+     "L0079@p.luxia:5:15"},
 };
 
 /* the reader of the files of a case */

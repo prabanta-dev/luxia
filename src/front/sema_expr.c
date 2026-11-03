@@ -912,6 +912,13 @@ static limba_ltype conversion(limba_lxs *S, uint32_t node, uint32_t scope,
             return target;
         }
         S->val[node] = S->val[a];
+        if (t != S->ts.nil && t != target) {
+            /* the two types reach the same routines (§ 11.5) */
+            LIMBA_GROW(S->pjoin, S->npjoin, S->cappjoin);
+            S->pjoin[S->npjoin++] = t;
+            LIMBA_GROW(S->pjoin, S->npjoin, S->cappjoin);
+            S->pjoin[S->npjoin++] = target;
+        }
         return target;
     }
     if (!numeric && !booleans && !position && !lxs_compatible(S, t, target)) {
@@ -1771,6 +1778,10 @@ static limba_ltype value_call(limba_lxs *S, uint32_t node, uint32_t scope,
     }
     lxs_alias_via(S, pt, given);
     free(given);
+    if (S->who) {
+        LIMBA_GROW(S->icalls, S->nicalls, S->capicalls);
+        S->icalls[S->nicalls++] = (limba_lxs_icall){S->who, pt, node};
+    }
     return set(S, node, result);
 }
 
