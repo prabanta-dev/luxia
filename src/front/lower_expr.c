@@ -1973,6 +1973,7 @@ limba_id lxl_value(lxl *L, uint32_t node)
         const lxl_store *st = &L->store[s];
         if (st->kind == LXL_SSA)
             return limba_ssa_use(L->ssa, st->var, L->cur, node);
+        lxl_shadow_use(L, s, node); /* captured by a nested routine */
         return load(L, t, lxl_var_addr(L, s));
     }
     case LXN_SEL:
@@ -2088,4 +2089,6 @@ void lxl_assign(lxl *L, uint32_t node, uint32_t target, uint32_t value)
     lxl_at(L, node);
     v = lxl_coerce(L, v, ntype(L, value), t);
     store(L, v, dst);
+    if (x->kind == LXN_REF)
+        lxl_shadow_def(L, S->sym[target]); /* captured (§ 5.5) */
 }

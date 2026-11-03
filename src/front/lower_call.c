@@ -279,6 +279,12 @@ static void routine(lxl *L, uint32_t node, limba_sym s, limba_id *result)
     bool ext = lxl_external(L, s);
     bool agg = sig->elem != S->ts.void_ && !lxl_scalar(L, sig->elem);
     limba_id slot = LIMBA_NONE;
+    if (lxl_has_env(L, s)) {
+        /* a nested routine: the environment of the routine around it,
+           first (§ 8.9) */
+        LIMBA_GROW(ops, n, cap);
+        ops[n++] = L->env;
+    }
     if (agg) {
         /* a record or an array result: a slot of the caller, first */
         slot = lxl_temp(L, sig->elem, node);
@@ -357,11 +363,15 @@ static void routine(lxl *L, uint32_t node, limba_sym s, limba_id *result)
     free(pv);
     free(pk);
     lxl_at(L, node);
+    /* what a nested routine reads must have a value here, what it
+       assigns has one after (§ 5.5) */
+    lxl_nest_call(L, s, node, false);
     limba_id rt =
         sig->elem == S->ts.void_ || agg ? LIMBA_T_VOID : lxl_type(L, sig->elem);
     limba_id r = lxl_emit(L, ext ? LIMBA_OP_CALLEXT : LIMBA_OP_CALL, rt, 0,
                           L->func_of[s], 0, ops, n);
     free(ops);
+    lxl_nest_call(L, s, node, true);
     for (uint32_t b = 0; b < nbacks; b += 3) {
         limba_id x = un(L, LIMBA_OP_LOAD, backs[b + 2], backs[b + 1]);
         lxl_live(L, backs[b]);

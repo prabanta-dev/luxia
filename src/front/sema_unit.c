@@ -991,6 +991,42 @@ static int by_routine(const void *a, const void *b)
     return x->node < y->node ? -1 : x->node > y->node;
 }
 
+/* a variable of routine g->host given by address to a routine nested
+   in it that can write it, itself or through the nested routines of
+   host it calls (§ 8.1, § 8.9) */
+static void alias_captured(limba_lxs *S, const use_index *x,
+                           const limba_lxs_galias *g, uint32_t *seen,
+                           limba_sym *todo, uint32_t walk)
+{
+    uint32_t n = 0;
+    todo[n++] = g->routine;
+    seen[g->routine] = walk;
+    while (n) {
+        uint32_t k = use_key(x, todo[--n]);
+        for (uint32_t j = x->off[k]; j < x->off[k + 1]; j++) {
+            limba_sym m = S->uses[x->idx[j]].what;
+            if (seen[m] == walk || lxs_outer(S, m) != g->host)
+                continue;
+            seen[m] = walk;
+            todo[n++] = m;
+        }
+    }
+    bool wrote = false;
+    for (uint32_t i = 0; i < S->ncaps && !wrote; i++)
+        wrote = S->caps[i].write && S->caps[i].var == g->var &&
+                seen[S->caps[i].nested] == walk;
+    if (!wrote)
+        return;
+    size_t vn, rn, hn;
+    const char *vp = lxs_spell(S, g->var, &vn);
+    const char *rp = lxs_spell(S, g->routine, &rn);
+    const char *hp = lxs_spell(S, g->host, &hn);
+    lxs_error(S, LXE_ALIASED, g->node,
+              "'%.*s' is given to '%.*s', which can also change it as a "
+              "variable of '%.*s': pass a copy",
+              (int)vn, vp, (int)rn, rp, (int)hn, hp);
+}
+
 static void alias_globals(limba_lxs *S, const use_index *x)
 {
     if (!S->ngalias)
@@ -1002,7 +1038,12 @@ static void alias_globals(limba_lxs *S, const use_index *x)
     uint32_t walk = 0;
     for (uint32_t i = 0; i < S->ngalias; i++) {
         const limba_lxs_galias *g = &S->galias[i];
-        if (!i || g->routine != S->galias[i - 1].routine) {
+        if (g->host) {
+            alias_captured(S, x, g, seen, todo, ++walk);
+            continue;
+        }
+        if (!i || g->routine != S->galias[i - 1].routine ||
+            S->galias[i - 1].host) {
             walk++;
             uint32_t n = 0;
             todo[n++] = g->routine;

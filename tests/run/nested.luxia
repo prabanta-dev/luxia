@@ -1,0 +1,123 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+//
+// Routines nested in a routine (§ 8.9): the environment holds scalars, a
+// String, records, var and out parameters, open and computed arrays;
+// nested routines call each other, recursively too
+program Nested;
+
+type
+  Pair = record a, b: Int32; end;
+  Vec = array[Int32 range 1..4] of Int64;
+  Grid = array[Int32 range 1..2, Int32 range 1..3] of Int32;
+
+procedure Scalars(var acc: Int64; k: Int32; out last: Int32);
+var count: Int32 := 0;
+    name: String := "s";
+
+  procedure Add(v: Int32);
+  begin
+    acc := acc + Int64(v) * Int64(k);
+    count := count + 1;
+    last := v;
+    name := name & "+";
+  end Add;
+
+  function Twice(): Int32;
+  begin
+    Add(2);
+    return count * 2;
+  end Twice;
+
+begin
+  Add(1);
+  writeln(Twice(), " ", count, " ", name, " ", acc);
+end Scalars;
+
+procedure Records(p: Pair; var q: Pair; out r: Pair);
+var local: Pair := {a: 7; b: 8};
+
+  function Sum(): Pair;
+  begin
+    return {a: p.a + q.a + local.a; b: p.b + q.b + local.b};
+  end Sum;
+
+  procedure Fill();
+  begin
+    r := Sum();
+    q.a := q.a + 100;
+    local.b := 0;
+  end Fill;
+
+begin
+  Fill();
+  writeln(r.a, " ", r.b, " ", q.a, " ", local.b);
+end Records;
+
+procedure Opens(v: array[Int32 range <>] of Int64; var w: array[Int32 range <>] of Int64; n: Int32);
+var dyn: array[Int32 range 1..n] of Int32;
+    g: Grid;
+
+  function Total(): Int64;
+  var s: Int64 := 0;
+  begin
+    for var i: Int32 := low(v) to high(v) do
+      s := s + v[i];
+    end;
+    for var i: Int32 := low(dyn) to high(dyn) do
+      s := s + Int64(dyn[i]);
+    end;
+    return s + Int64(g[2, 3]);
+  end Total;
+
+  procedure Double();
+  begin
+    for var i: Int32 := low(w) to high(w) do
+      w[i] := w[i] * 2;
+    end;
+    dyn[n] := 10;
+  end Double;
+
+begin
+  for var i: Int32 := 1 to n do
+    dyn[i] := i;
+  end;
+  g := {{1, 2, 3}, {4, 5, 6}};
+  Double();
+  writeln(Total(), " ", length(dyn), " ", w[low(w)]);
+end Opens;
+
+function Fact(n: Int32): Int64;
+var calls: Int32 := 0;
+
+  function F(k: Int32): Int64;
+  begin
+    calls := calls + 1;
+    if k <= 1 then
+      return 1;
+    end;
+    return Int64(k) * F(k - 1);
+  end F;
+
+begin
+  var r: Int64 := F(n);
+  writeln("calls ", calls);
+  return r;
+end Fact;
+
+var acc: Int64 := 5;
+    last: Int32;
+    x, y, z: Pair;
+    v: Vec := {1, 2, 3, 4};
+    w: Vec := {1, 1, 1, 1};
+begin
+  Scalars(acc, 3, last);
+  writeln(acc, " ", last);
+  x := {a: 1; b: 2};
+  y := {a: 10; b: 20};
+  Records(x, y, z);
+  writeln(z.a, " ", y.a);
+  Opens(v, w, 3);
+  writeln(w[1], " ", w[4]);
+  writeln(Fact(10));
+end Nested.

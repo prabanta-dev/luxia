@@ -56,7 +56,8 @@ line and the column.
 
 `luxia` checks a source in phases:
 
-1. the **lexical** analysis (L0001–L0009) and the **syntax** (L0010–L0020);
+1. the **lexical** analysis (L0001–L0009) and the **syntax** (L0010–L0020,
+   but L0017, which the semantic analysis gives);
 2. the **semantic** analysis: names, types, constants, statements;
 3. the **translation** to the intermediate representation, which also
    checks definite assignment, `out` parameters and missing `return`s
@@ -386,26 +387,6 @@ end.
 
 ```
 prog.luxia:4:5: error[L0016]: '=' compares: assign with ':='
-```
-
-### L0017 — NESTED ROUTINE
-
-Routines are declared only at program level in Luxia 0 (§ 8.4).
-
-```pascal
-program p;
-procedure Outer();
-  procedure Inner();
-  begin
-  end;
-begin
-end;
-begin
-end.
-```
-
-```
-prog.luxia:3:3: error[L0017]: a routine cannot be declared inside another one in Luxia 0
 ```
 
 ### L0018 — EMPTY STATEMENT
@@ -1025,6 +1006,54 @@ prog.luxia:3:8: error[L0055]: an exit status is 0 or 2..255 but 141: 1 is kept f
 
 ## Where a construct is allowed
 
+### L0017 — NESTED ROUTINE
+
+Routines nest one level only: a routine nested in a routine of the file
+contains no routine. A nested routine is neither a routine of C nor an
+operator, nor a `str` added for a type: those are declared at the level
+of a file (§ 8.9).
+
+```pascal
+program p;
+procedure Outer();
+  procedure Inner();
+    procedure Deeper();
+    begin
+    end;
+  begin
+  end;
+begin
+  Inner();
+end;
+begin
+  Outer();
+end.
+```
+
+```
+prog.luxia:4:15: error[L0017]: a nested routine contains no routine: routines nest one level only
+```
+
+A routine of C, and an operator, inside a routine:
+
+```pascal
+procedure Outer();
+  procedure Put(c: Int32); external "c" name "putchar";
+```
+
+```
+prog.luxia:3:13: error[L0017]: a routine of C is declared at the level of a file, not inside a routine
+```
+
+```pascal
+procedure Outer();
+  function "+"(a, b: Vec): Vec;
+```
+
+```
+prog.luxia:4:12: error[L0017]: an operator, or a str added for a type, is declared at the level of a file, not inside a routine
+```
+
 ### L0048 — FORMAT OUTSIDE WRITE
 
 `x:width` and `x:width:decimals` are allowed only in the arguments of
@@ -1128,6 +1157,31 @@ end.
 
 ```
 prog.luxia:4:11: error[L0053]: 'y' may be read before it is given a value
+```
+
+A call of a nested routine reads what the routine may read before it
+assigns it, and assigns what it assigns on every path that returns
+(§ 5.5, § 8.9). The error is at the call, with the name of the routine:
+
+```pascal
+program p;
+procedure Report();
+var total: Int64;
+  procedure Line(n: Int64);
+  begin
+    total := total + n;
+  end;
+begin
+  Line(5);
+  writeln(total);
+end;
+begin
+  Report();
+end.
+```
+
+```
+prog.luxia:9:3: error[L0053]: 'total' may be read by 'Line' before it is given a value
 ```
 
 ### L0056 — OUT PARAMETER WITHOUT A VALUE
@@ -2100,6 +2154,31 @@ end.
 ```
 prog.luxia:9:9: error[L0102]: 'g' is given to 'Touch', which can also change it as a variable of its file: pass a copy
 ```
+
+A variable of a routine given so to a routine nested in it that can
+write it, itself or through the nested routines it calls (§ 8.9):
+
+```pascal
+program p;
+type Row = record a, b: Int32; end;
+procedure Outer();
+var rows: Row := {a: 1; b: 2};
+  procedure Fix(r: Row);
+  begin
+    rows.a := r.b;
+  end;
+begin
+  Fix(rows);
+end;
+begin
+  Outer();
+end.
+```
+
+```
+prog.luxia:10:7: error[L0102]: 'rows' is given to 'Fix', which can also change it as a variable of 'Outer': pass a copy
+```
+
 ## All the codes
 
 | Code | Name | Meaning |
@@ -2120,7 +2199,7 @@ prog.luxia:9:9: error[L0102]: 'g' is given to 'Touch', which can also change it 
 | L0014 | PREFIX_POWER | `not a ** b` |
 | L0015 | END_NAME | the name after `end` is not the one it closes |
 | L0016 | NOT_A_STATEMENT | neither an assignment nor a call |
-| L0017 | NESTED_ROUTINE | a routine inside a routine |
+| L0017 | NESTED_ROUTINE | a routine inside a nested one; a nested routine of C, operator or `str` |
 | L0018 | EMPTY_STATEMENT | `;;` |
 | L0019 | AFTER_END | text after the final `end.` |
 | L0020 | END_ALIGN | warning: `end` not under its opening |

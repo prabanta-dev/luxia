@@ -338,6 +338,8 @@ void limba_lxs_free(limba_lxs *S)
     free(S->eqs);
     free(S->galias);
     lxs_unit_free(S);
+    free(S->outer);
+    free(S->caps);
     limba_types_free(&S->ts);
     limba_symtab_free(&S->st);
     memset(S, 0, sizeof(*S));
@@ -534,6 +536,14 @@ void lxs_declare_all(limba_lxs *S, uint32_t list, uint32_t scope, bool top)
         }
         case LXN_ROUTINE: {
             limba_sym s = 0;
+            if (!top && lxs_op_named(S, d)) {
+                /* in the part of a file of its type (§ 6.9, § 8.9) */
+                lxs_error(S, LXE_NESTED_ROUTINE, x->a,
+                          "an operator, or a str added for a type, is "
+                          "declared at the level of a file, not inside a "
+                          "routine");
+                break;
+            }
             if (lxs_op_declare(S, scope, d, &s) ||
                 lxs_ovl_declare(S, scope, d, &s))
                 mark(S, s, top);

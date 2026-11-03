@@ -333,6 +333,8 @@ static const parse_case program_cases[] = {
      "(program p [(routine procedure a [] - (body [] []))] [])", "L0010@1:23"},
     {"program p; procedure a(); begin end b; begin end.",
      "(program p [(routine procedure a [] - (body [] []))] [])", "L0015@1:37"},
+    /* a routine inside another: the grammar takes it, the semantic phase
+       allows one level (§ 8.9) */
     {"program p;\n"
      "procedure a();\n"
      "  procedure b();\n"
@@ -344,7 +346,7 @@ static const parse_case program_cases[] = {
      "end.",
      "(program p [(routine procedure a [] - (body [(routine procedure b [] "
      "- (body [] []))] []))] [])",
-     "L0017@3:3"},
+     ""},
     {"program p;\nbegin\n  if a then\n    x := 1;\n   end;\nend.",
      "(program p [] [(if [(arm a [(assign x 1)])] -)])", "L0020@5:4"},
     {"program p; begin end. x", "(program p [] [])", "L0019@1:23"},
@@ -1040,7 +1042,50 @@ static const sema_case sema_cases[] =
         {"program p; type V = record x: Int32; end; function str(v: V): String; overload; begin return \"<\" & str(v.x) & \">\"; end; var u: V := {x: 3}; begin writeln(u, str(u), u:5); end.",
          ""},
         {"program p; type V = record x: Int32; end; function str(v: V): String; overload; begin return \"v\"; end; var u: V; begin writeln(u:5:2); end.",
-         "L0048@1:132"},
+         "L0048@1:132"},        /* routines nested in a routine (§ 8.9) */
+        /* a routine inside a nested one, a nested one of C, an operator and a str nested (L0017) */
+        {"program p; procedure A(); procedure B(); procedure C(); begin end; begin end; begin end; begin A(); end.",
+         "L0017@1:52"},
+        {"program p; procedure A(); procedure B(); external \"c\"; begin end; begin A(); end.",
+         "L0017@1:37"},
+        {"program p; procedure A(); function \"+\"(a, b: Boolean): Boolean; begin return a or b; end; begin end; begin A(); end.",
+         "L0017@1:36"},
+        {"program p; type V = record a: Int32; end; procedure A(); function str(v: V): String; overload; begin return \"v\"; end; begin end; begin A(); end.",
+         "L0017@1:67"},
+        /* what a nested routine sees: the variables declared before it, not those of the body; it is not seen outside */
+        {"program p; procedure A(); var x: Int32 := 1; procedure B(); begin writeln(x, y); end; var y: Int32 := 2; begin B(); end; begin A(); end.",
+         "L0024@1:78 L0000@1:91"},
+        {"program p; procedure A(); procedure B(); begin writeln(z); end; begin var z: Int32 := 1; B(); end; begin A(); end.",
+         "L0021@1:56"},
+        {"program p; procedure A(); procedure B(); begin end; begin end; begin B(); end.",
+         "L0021@1:70"},
+        {"program p; procedure A(); var Q: Int32; procedure Q(); begin end; begin end; begin A(); end.",
+         "L0023@1:51 L0000@1:31"},
+        /* a parameter without a mode stays constant; exit acts inside the nested routine */
+        {"program p; procedure A(n: Int32); procedure B(); begin n := 2; end; begin B(); end; begin A(1); end.",
+         "L0034@1:56"},
+        {"program p; procedure A(); var i: Int32 := 0; procedure B(); begin exit; end; begin while i < 3 do B(); i := i + 1; end; end; begin A(); end.",
+         "L0045@1:67"},
+        /* overloading among nested routines and with a name of the file (§ 5.4, § 8.8) */
+        {"program p; procedure A(); procedure Lone(); overload; begin end; begin Lone(); end; begin A(); end.",
+         "L0101@1:37"},
+        {"program p; procedure A(); procedure M(a: Int32); begin end; procedure M(a: Float64); begin end; begin end; begin A(); end.",
+         "L0093@1:71 L0000@1:37"},
+        {"program p; function Max(a, b: Int32): Int32; overload; begin if a > b then return a; end; return b; end; procedure A(); function Max(a, b: Float64): Float64; begin if a > b then return a; end; return b; end; begin writeln(Max(Int32(1), 2)); end; begin A(); end.",
+         "L0101@1:21 L0027@1:227"},
+        {"program p; function Max(a, b: Int32): Int32; begin if a > b then return a; end; return b; end; procedure A(); function Max(a, b: Float64): Float64; overload; begin if a > b then return a; end; return b; end; begin writeln(Max(1.5, 0.5)); end; begin A(); end.",
+         "L0101@1:120"},
+        {"program p; function Max(a, b: Int32): Int32; overload; begin if a > b then return a; end; return b; end; procedure A(); function Max(a, b: Float64): Float64; overload; begin if a > b then return a; end; return b; end; begin writeln(Max(1.5, 0.5)); end; begin A(); end.",
+         ""},
+        /* a variable of the routine given by address to a nested routine that can change it (§ 8.1) */
+        {"program p; type Row = record a, b: Int32; end; procedure A(); var rows: Row; procedure Fix(r: Row); begin rows.a := r.b; end; begin rows := {a: 1; b: 2}; Fix(rows); end; begin A(); end.",
+         "L0102@1:159"},
+        {"program p; procedure A(); var x: Int32 := 0; procedure W(var r: Int32); begin x := r; end; begin W(x); end; begin A(); end.",
+         "L0102@1:100"},
+        {"program p; procedure A(); var x: Int32 := 0; procedure S(); begin x := 1; end; procedure W(var r: Int32); begin S(); end; begin W(x); end; begin A(); end.",
+         "L0102@1:131"},
+        {"program p; type Row = record a, b: Int32; end; procedure A(); var rows: Row; procedure Show(r: Row); begin writeln(r.a); end; begin rows := {a: 1; b: 2}; Show(rows); end; begin A(); end.",
+         ""},
 };
 
 static void check_string(const char *src, char **errors)
@@ -1704,6 +1749,62 @@ static const run_case
             {"program p; function f(x: Int32): Int32; begin if x > 0 then return 1; "
              "end; end; begin writeln(f(1)); end.",
              "", "errors L0052@1:21"},
+            /* routines nested in a routine (§ 8.9) */
+        /* definite assignment through the calls of nested routines (§ 5.5): an out parameter assigned on every path, on one */
+            {"program p; procedure A(out n: Int32); procedure B(); begin n := 2; end; begin B(); end; var g: Int32; begin A(g); writeln(g); end.",
+             "2\n", "ok"},
+            {"program p; procedure A(out n: Int32; c: Boolean); procedure B(); begin if c then n := 2; end; end; begin B(); end; var g: Int32; begin A(g, true); writeln(g); end.",
+             "", "errors L0056@1:22"},
+        /* a read before a write of its own; a write of its own first; Reset() that assigns */
+            {"program p; procedure A(); var t: Int32; procedure B(); begin t := t + 1; end; begin B(); end; begin A(); end.",
+             "", "errors L0053@1:85"},
+            {"program p; procedure A(); var t: Int32; procedure B(); begin t := 0; t := t + 1; end; begin B(); writeln(t); end; begin A(); end.",
+             "1\n", "ok"},
+            {"program p; procedure A(); var t: Int32; procedure R(); begin t := 0; end; procedure B(); begin t := t + 1; end; begin R(); B(); writeln(t); end; begin A(); end.",
+             "1\n", "ok"},
+        /* a call inside a nested routine counts at its place: after t := 0, before it */
+            {"program p; procedure A(); var t: Int32; procedure B(); begin writeln(t); end; procedure C(); begin t := 0; B(); end; begin C(); writeln(t); end; begin A(); end.",
+             "0\n0\n", "ok"},
+            {"program p; procedure A(); var t: Int32; procedure B(); begin writeln(t); end; procedure C(); begin B(); t := 0; end; begin C(); writeln(t); end; begin A(); end.",
+             "", "errors L0053@1:124"},
+        /* recursive nested routines: the writes grow from none (a write only through the other is not counted), the reads are closed */
+            {"program p; procedure A(); var t: Int32; procedure E(k: Int32); begin if k > 0 then O(k - 1); else t := 1; end; end; procedure O(k: Int32); begin t := 2; if k > 0 then E(k - 1); end; end; begin E(3); writeln(t); end; begin A(); end.",
+             "2\n", "ok"},
+            {"program p; procedure A(); var t: Int32; procedure E(k: Int32); begin if k > 0 then O(k - 1); else t := 1; end; end; procedure O(k: Int32); begin if k > 0 then E(k - 1); else t := 2; end; end; begin E(3); writeln(t); end; begin A(); end.",
+             "", "errors L0053@1:213"},
+            {"program p; procedure A(); var u: Int32; procedure E(k: Int32); begin if k > 0 then O(k - 1); end; end; procedure O(k: Int32); begin writeln(u); if k > 0 then E(k - 1); end; end; begin E(3); u := 1; end; begin A(); end.",
+             "", "errors L0053@1:185"},
+        /* a nested function that assigns: in the second operand of and, in the condition of if */
+            {"program p; procedure A(); var t: Int32; function F(): Boolean; begin t := 1; return true; end; var b: Boolean := false; begin if b and F() then writeln(t); end; writeln(t); end; begin A(); end.",
+             "", "errors L0053@1:170"},
+            {"program p; procedure A(); var t: Int32; function F(): Boolean; begin t := 1; return true; end; var b: Boolean := true; begin if b and F() then writeln(t); end; end; begin A(); end.",
+             "1\n", "ok"},
+            {"program p; procedure A(); var t: Int32; function F(): Boolean; begin t := 1; return true; end; begin if F() then writeln(t); end; writeln(t); end; begin A(); end.",
+             "1\n1\n", "ok"},
+        /* assigned on one path, and a path that halts */
+            {"program p; procedure A(c: Boolean); var x: Int32; procedure B(); begin if c then x := 5; end; end; begin B(); writeln(x); end; begin A(true); end.",
+             "", "errors L0053@1:119"},
+            {"program p; procedure A(c: Boolean); var x: Int32; procedure B(); begin if c then x := 5; else halt(3); end; end; begin B(); writeln(x); end; begin A(false); end.",
+             "", "halt 3"},
+        /* recursion, return inside, default values and names */
+            {"program p; function A(n: Int32): Int32; function B(k: Int32): Int32; begin if k = 0 then return 0; end; return n + B(k - 1); end; begin return B(n); end; begin writeln(A(4)); end.",
+             "16\n", "ok"},
+            {"program p; procedure A(); procedure B(); begin return; writeln(1); end; begin B(); writeln(2); end; begin A(); end.",
+             "2\n", "ok"},
+            {"program p; procedure A(); procedure B(k: Int32 := 3; m: Int32 := 4); begin writeln(k, m); end; begin B(m => 1); B(); end; begin A(); end.",
+             "31\n34\n", "ok"},
+            {"program p; procedure A(); var n: Int32 := 0; procedure B(); begin n := n + 1; if n < 5 then B(); end; end; begin B(); writeln(n); end; begin A(); end.",
+             "5\n", "ok"},
+        /* without overload a nested routine hides the name; with it, it joins and hides the homograph */
+            {"program p; function Max(a, b: Int32): Int32; begin if a > b then return a; end; return b; end; procedure A(); function Max(a, b: Float64): Float64; begin if a > b then return a; end; return b; end; begin writeln(Max(1, 2)); end; begin A(); end.",
+             "2.0\n", "ok"},
+            {"program p; function Max(a, b: Int32): Int32; overload; begin if a > b then return a; end; return b; end; function Max(a, b: Float64): Float64; overload; begin return 0.0; end; procedure A(); function Max(a, b: Float64): Float64; overload; begin if a > b then return a; end; return b; end; procedure B(); begin writeln(Max(Int32(1), 2), \" \", Max(1.5, 0.5)); end; begin B(); writeln(Max(Int32(3), 4), \" \", Max(2.5, 0.5)); end; begin A(); writeln(Max(2.5, 0.5)); end.",
+             "2 1.5\n4 2.5\n0.0\n", "ok"},
+            {"program p; function Max(a, b: Int32): Int32; overload; begin if a > b then return a; end; return b; end; procedure A(); function Max(a, b: Int32): Int32; overload; begin return 99; end; begin writeln(Max(1, 2)); end; begin A(); end.",
+             "99\n", "ok"},
+        /* the environment: scalars, a String, a record, var and out, an open array, a computed array, a function result */
+            {"program p; type Pr = record a, b: Int32; end; procedure A(var acc: Int64; k: Int32; out last: Int32; r: Pr; v: array[Int32 range <>] of Int32); var n: Int32 := 0; s: String := \"s\"; d: array[Int32 range 1..k] of Int32; function Get(): Pr; begin return {a: r.b; b: n}; end; procedure Add(x: Int32); begin acc := acc + Int64(x); n := n + 1; last := x; s := s & \"+\"; d[n] := v[low(v) + n - 1]; end; begin Add(1); Add(2); writeln(acc, \" \", n, \" \", s, \" \", d[1] + d[2], \" \", Get().a, Get().b); end; var g: Int64 := 10; l: Int32; begin A(g, 2, l, {a: 1; b: 7}, {5, 6}); writeln(g, \" \", l); end.",
+             "13 2 s++ 11 72\n13 2\n", "ok"},
             /* records and arrays as results: into a slot of the caller */
             {"program p;\ntype V = record x, y: Int32; end;\n"
              "type A = array[Int32 range 1..4] of Int64;\n"
@@ -2872,6 +2973,17 @@ static const unit_case unit_cases[] = {
       {"ub.luxia",
        "unit Ub;\ninterface\nuses Ua;\nfunction Make(n: Int32): Vec;\nimplementation\nfunction Make(n: Int32): Vec;\nbegin\n  return {x: n; y: -n};\nend Make;\nend Ub.\n"}},
      "<1,-1> <2,-2>\n",
+     "ok",
+     ""},    /* routines nested in a routine of an implementation (§ 8.9): one with
+       overload joins the routine of a unit its file uses; those of a
+       routine no initialisation reaches are checked too */
+    {{{"p.luxia",
+       "program P;\nuses Ub;\nbegin\n  writeln(Calc(4));\nend P.\n"},
+      {"ua.luxia",
+       "unit Ua;\ninterface\nfunction Same(x: Int32): Int32; overload;\nimplementation\nfunction Same(x: Int32): Int32; overload;\nbegin\n  return x + 10;\nend Same;\nend Ua.\n"},
+      {"ub.luxia",
+       "unit Ub;\ninterface\nfunction Calc(n: Int32): Int64;\nimplementation\nuses Ua;\nfunction Calc(n: Int32): Int64;\nvar r: Int64;\n  function Same(x: Float64): Float64; overload;\n  begin\n    return x * 2.0;\n  end Same;\n  procedure Mul();\n  begin\n    r := Int64(n) * 3;\n  end Mul;\nbegin\n  Mul();\n  writeln(Same(Int32(1)), \" \", Same(1.5));\n  return r;\nend Calc;\nfunction Unused(): Int32;\nvar k: Int32;\n  procedure Set();\n  begin\n    k := 1;\n  end Set;\nbegin\n  Set();\n  return k;\nend Unused;\nend Ub.\n"}},
+     "11 3.0\n12\n",
      "ok",
      ""},
 };

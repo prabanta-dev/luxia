@@ -568,7 +568,6 @@ static uint32_t decls(limba_lxp *P, unsigned where, uint32_t first)
 {
     limba_loc loc = lxp_loc(P);
     uint32_t mark = limba_lx_list_begin(P->t);
-    bool top = where != LXP_LOCAL;
     if (first)
         limba_lx_list_push(P->t, first);
     for (;;) {
@@ -594,10 +593,8 @@ static uint32_t decls(limba_lxp *P, unsigned where, uint32_t first)
             break;
         case LX_KW_PROCEDURE:
         case LX_KW_FUNCTION:
-            if (!top)
-                limba_lxp_error(P, LXE_NESTED_ROUTINE, P->pos,
-                                "a routine cannot be declared inside "
-                                "another one in Luxia 0");
+            /* inside a routine too: the semantic phase allows one level
+               (§ 8.9) */
             limba_lx_list_push(P->t, routine(P, where == LXP_INTERFACE));
             break;
         case LX_KW_USES:

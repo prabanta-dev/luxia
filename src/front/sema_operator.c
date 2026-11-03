@@ -63,6 +63,12 @@ static bool is_str(limba_lxs *S, uint32_t d)
            S->st.sym[u].value == LXB_STR;
 }
 
+bool lxs_op_named(limba_lxs *S, uint32_t d)
+{
+    limba_lx_node *nx = lxs_node(S, lxs_node(S, d)->a);
+    return nx->kind == LXN_NAME && ((nx->flags & LXN_F_OPNAME) || is_str(S, d));
+}
+
 bool lxs_op_is(const limba_lxs *S, limba_sym s)
 {
     const limba_symbol *y = &S->st.sym[s];

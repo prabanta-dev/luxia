@@ -682,8 +682,10 @@ static limba_ltype reference(limba_lxs *S, uint32_t node, uint32_t scope)
         return set(S, node, y->type);
     case LIMBA_LSYM_VAR:
         lxs_use(S, s, node, false);
+        lxs_capture(S, s, node, false);
         return set(S, node, y->type);
     case LIMBA_LSYM_PARAM:
+        lxs_capture(S, s, node, false);
         return set(S, node, y->type);
     case LIMBA_LSYM_TYPE:
         sp = lxs_spell(S, s, &n);
@@ -2404,10 +2406,13 @@ bool lxs_writable(limba_lxs *S, uint32_t node, bool report)
                 }
             }
             lxs_use(S, s, node, true);
+            lxs_capture(S, s, node, true);
             return true;
         }
-        if (y->kind == LIMBA_LSYM_PARAM && y->mode != LXS_IN)
+        if (y->kind == LIMBA_LSYM_PARAM && y->mode != LXS_IN) {
+            lxs_capture(S, s, node, true);
             return true;
+        }
         why = y->kind == LIMBA_LSYM_VAR ? "the variable of a for is constant "
                                           "in the loop"
               : y->kind == LIMBA_LSYM_PARAM

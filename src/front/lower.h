@@ -74,7 +74,40 @@ typedef struct {
        below and above, all through the body; LXL_ONE for a lower bound
        of 1 and more, the first index of every string */
     limba_sym lo_of, hi_of;
+    /* a captured scalar whose definite assignment is followed: its
+       shadow SSA variable + 1 (lower_nest.c), 0 if none */
+    uint32_t shadow;
 } lxl_store;
+
+/* a variable a nested routine names, in the environment of the routine
+   around it (lower_nest.c) */
+typedef struct {
+    limba_sym var;
+    uint32_t off;  /* its place in the environment */
+    uint8_t how;   /* the field itself, an address, an open or computed
+                      array */
+    int32_t track; /* its index among those whose definite assignment is
+                      followed, -1 if not */
+} lxl_cap;
+
+typedef struct {
+    limba_sym outer;
+    lxl_cap *caps;
+    uint32_t ncaps, capcaps;
+    uint32_t ntrack, nw; /* nw words of 64 bits per set */
+    uint64_t size;
+    uint32_t align;
+    limba_id type; /* the IR struct, made with the first function */
+} lxl_env;
+
+/* a nested routine: the variables it names, and the tracked ones it may
+   read before it writes them, and writes on every path that returns */
+typedef struct {
+    limba_sym sym;
+    limba_sym *vars;
+    uint32_t nvars, capvars;
+    uint64_t *reads, *writes;
+} lxl_nest;
 
 #define LXL_ONE UINT32_MAX
 
@@ -151,7 +184,48 @@ typedef struct {
        before the routines; the anonymous ones numbered so far */
     limba_id *eq_of;
     uint32_t neq_anon;
+    /* nested routines (§ 8.9, lower_nest.c): the environments, the
+       nested routines, per symbol their index + 1 (capix: environment
+       << 16 | variable, of a captured variable); in the function being
+       built its routine, the address of its environment (LIMBA_NONE if
+       none, also the value of the definitions of the shadows), and the
+       reads of the calls of nested routines (variable, routine, node) */
+    lxl_env *envs;
+    uint32_t nenvs, capenvs;
+    lxl_nest *nests;
+    uint32_t nnests, capnests;
+    uint32_t *capix, *nestix;
+    uint32_t ncapix, nnestix;
+    limba_sym routine_sym;
+    limba_id env;
+    uint32_t *rplace;
+    uint32_t nrplace, caprplace;
 } lxl;
+
+/* nested routines (lower_nest.c, § 8.9) */
+/* the environments and the sets of definite assignment, once */
+void lxl_nest_prepare(lxl *L);
+void lxl_nest_free(lxl *L);
+/* does the nested routine n take the address of an environment */
+bool lxl_has_env(const lxl *L, limba_sym n);
+/* the environment of routine o, if it has one: made, L->env set; the
+   captured variables kept in it */
+void lxl_env_begin(lxl *L, limba_sym o);
+/* is s a captured variable that is a field of the environment */
+bool lxl_env_value(const lxl *L, limba_sym s);
+/* the address (and bounds) of captured s written in the environment,
+   once its storage is known */
+void lxl_env_put(lxl *L, limba_sym s);
+/* a nested routine n: what it names, read from its environment */
+void lxl_nest_begin(lxl *L, limba_sym n);
+/* a definition, a use of the shadow of s (nothing if none) */
+void lxl_shadow_def(lxl *L, limba_sym s);
+void lxl_shadow_use(lxl *L, limba_sym s, uint32_t tag);
+/* a call of nested routine n at node: before it its reads, after it its
+   writes (in the routine around it only) */
+void lxl_nest_call(lxl *L, limba_sym n, uint32_t node, bool after);
+/* a read of a call no assignment reaches: tag k of lxl_nest_call */
+void lxl_nest_undefined(lxl *L, uint32_t k);
 
 /* the indices of array type t: 1, or more for an array of more */
 uint32_t lxl_dims(const lxl *L, limba_ltype t);

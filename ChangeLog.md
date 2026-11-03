@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Nested routines (§ 8.9): a routine of a file declares routines among
+  its declarations, one level deep, which see its parameters, constants,
+  types and the variables declared before them, and call each other in
+  any order. With `overload` a nested routine joins the routines of its
+  name outside and hides the homograph; without it hides the name. What
+  they name of the routine around them lives in one slot, its
+  environment, whose address is their first hidden parameter; their
+  names in the IR are `Outer/Nested`. A call of a nested routine reads
+  what it may read before it assigns it and assigns what it assigns on
+  every path that returns (§ 5.5, L0053 at the call); a variable of the
+  routine given by address to a nested routine that can write it is an
+  alias (L0102). A routine inside a nested one, a nested routine of C,
+  an operator or a `str` nested are L0017, now of the semantic phase.
+  `tests/run/nested` and `nested_names`.
 - Aliasing (§ 8.1): a record or an array without a mode is always
   passed by address; one object given to a routine by two ways, one of
   which can change it, is an error where the text decides it (the same

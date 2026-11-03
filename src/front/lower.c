@@ -568,10 +568,12 @@ static void var_decl(lxl *L, uint32_t d)
         if (!s)
             continue;
         limba_ltype t = L->S->st.sym[s].type;
-        if (t && (ti(L, t)->flags & LIMBA_TF_DYNAMIC))
+        if (t && (ti(L, t)->flags & LIMBA_TF_DYNAMIC)) {
             dynamic(L, s, tnode);
-        else if (L->store[s].kind == LXL_NONE)
+            lxl_env_put(L, s); /* a nested routine names it */
+        } else if (L->store[s].kind == LXL_NONE) {
             local(L, s);
+        }
         if (!init && t && !lxl_scalar(L, t) &&
             !(ti(L, t)->flags & LIMBA_TF_DYNAMIC) && lxl_has_narrow(L, t))
             lxl_invalidate(L, lxl_var_addr(L, s), 0, t); /* § 4.5 */
@@ -584,11 +586,12 @@ static void var_decl(lxl *L, uint32_t d)
                 v = lxl_value(L, init);
                 lxl_at(L, tmp); /* a range is checked at the name */
                 v = lxl_coerce(L, v, L->S->type[init], t);
-                if (st->kind == LXL_SSA)
+                if (st->kind == LXL_SSA) {
                     limba_ssa_def(L->ssa, st->var, L->cur, v);
-                else {
+                } else {
                     uint32_t o[2] = {v, lxl_var_addr(L, s)};
                     lxl_emit(L, LIMBA_OP_STORE, LIMBA_T_VOID, 0, 0, 0, o, 2);
+                    lxl_shadow_def(L, s);
                 }
             } else if (nd(L, init)->kind == LXN_AGG &&
                        (ti(L, t)->flags & LIMBA_TF_DYNAMIC)) {
@@ -1071,6 +1074,10 @@ static void scan_taken(lxl *L)
 static void undefined(void *ctx, uint32_t tag)
 {
     lxl *L = ctx;
+    if ((tag & 0xc0000000u) == 0xc0000000u) {
+        lxl_nest_undefined(L, tag & 0x3fffffffu);
+        return;
+    }
     if ((tag & 0xc0000000u) == 0x40000000u) {
         uint32_t k = tag & 0x3fffffffu;
         limba_sym s = L->out_place[2 * k];
@@ -1097,9 +1104,11 @@ static limba_id func_type(lxl *L, limba_sym s)
 {
     const limba_typeinfo *sig = ti(L, L->S->st.sym[s].type);
     limba_id *ps =
-        limba_xmalloc(((1 + 2 * LXL_MAXDIMS) * sig->count + 2) * sizeof(*ps));
+        limba_xmalloc(((1 + 2 * LXL_MAXDIMS) * sig->count + 3) * sizeof(*ps));
     uint32_t n = 0;
     bool agg = sig->elem != L->S->ts.void_ && !lxl_scalar(L, sig->elem);
+    if (lxl_has_env(L, s))
+        ps[n++] = LIMBA_T_PTR; /* the environment (§ 8.9) */
     if (agg)
         ps[n++] = LIMBA_T_PTR; /* where the result goes */
     for (uint32_t i = 0; i < sig->count; i++) {
@@ -1187,6 +1196,9 @@ static void begin_function(lxl *L, limba_id fid)
     L->ndyns = 0;
     L->ret_ptr = LIMBA_NONE;
     L->live_ptr = LIMBA_NONE;
+    L->env = LIMBA_NONE;
+    L->routine_sym = 0;
+    L->nrplace = 0;
     if (L->capvia)
         memset(L->via, 0xff, (size_t)L->capvia * sizeof(*L->via));
 }
@@ -1206,7 +1218,9 @@ static void store_outs(lxl *L, uint32_t node)
         if (st->kind == LXL_SSA) {
             v = limba_ssa_use(L->ssa, st->var, L->cur, 0x40000000u | k);
         } else {
-            /* its address was needed: a cell, not checked */
+            /* its address was needed: a cell, not checked, unless a
+               nested routine names it (§ 5.5) */
+            lxl_shadow_use(L, L->outs[i], 0x40000000u | k);
             uint32_t a = st->addr;
             limba_ltype t = L->S->st.sym[L->outs[i]].type;
             v = lxl_emit(L, LIMBA_OP_LOAD, lxl_type(L, t), 0, 0, 0, &a, 1);
@@ -1263,8 +1277,13 @@ static void routine_body(lxl *L, limba_sym s)
     pragmas(L, locals); /* for the whole routine */
     limba_func *f = limba_ssa_func(L->ssa);
     uint32_t k = 0, v = 0;
+    L->routine_sym = s;
+    if (lxl_has_env(L, s))
+        L->env = f->blocks[0].insts[v++]; /* nested: the environment */
     if (L->result && !lxl_scalar(L, L->result))
         L->ret_ptr = f->blocks[0].insts[v++];
+    /* the variables its nested routines name, in its environment */
+    lxl_env_begin(L, s);
     /* assign the entry parameters to the storage, in order */
     for (uint32_t i = 0; i < list_n(L, params); i++) {
         uint32_t p = list_at(L, params, i);
@@ -1291,8 +1310,11 @@ static void routine_body(lxl *L, limba_sym s)
             } else if (pp.mode == LXS_OUT && lxl_scalar(L, pp.type)) {
                 /* copied back at every return, as Ada does with scalars:
                    an SSA variable with no value yet, where a missing value
-                   is found, or a cell when its address is needed */
-                if (L->taken[ps]) {
+                   is found, or a cell when its address is needed (in the
+                   environment when a nested routine names it) */
+                if (lxl_env_value(L, ps)) {
+                    /* set by lxl_env_begin */
+                } else if (L->taken[ps]) {
                     local(L, ps);
                 } else {
                     st->kind = LXL_SSA;
@@ -1306,6 +1328,10 @@ static void routine_body(lxl *L, limba_sym s)
                 st->kind = LXL_MEM;
                 st->addr = first;
                 v++;
+            } else if (lxl_env_value(L, ps)) {
+                uint32_t o[2] = {first, st->addr};
+                lxl_emit(L, LIMBA_OP_STORE, LIMBA_T_VOID, 0, 0, 0, o, 2);
+                v++;
             } else if (L->taken[ps]) {
                 local(L, ps);
                 uint32_t o[2] = {first, st->addr};
@@ -1317,8 +1343,10 @@ static void routine_body(lxl *L, limba_sym s)
                 limba_ssa_def(L->ssa, st->var, 0, first);
                 v++;
             }
+            lxl_env_put(L, ps); /* its address, for its nested routines */
         }
     }
+    lxl_nest_begin(L, s);
     for (uint32_t i = 0; i < list_n(L, locals); i++) {
         uint32_t d = list_at(L, locals, i);
         if (nd(L, d)->kind == LXN_VAR)
@@ -1451,6 +1479,87 @@ limba_id lxl_eq_declare(lxl *L, limba_ltype t, limba_id ftype)
     return fid;
 }
 
+/* the function (or the extern) of routine s, declared by node x; a
+   nested routine's name is the one of its routine, '/', its own (§ 8.9) */
+static void declare_routine(lxl *L, limba_sym s, const limba_lx_node *x)
+{
+    limba_lxs *S = L->S;
+    /* a routine of a name with more meanings: the types of its
+       parameters after the name (§ 8.8) */
+    char prof[700] = "";
+    if (lxs_ovl_is(S, s) || lxs_op_is(S, s)) {
+        const limba_typeinfo *ft = &S->ts.t[S->st.sym[s].type];
+        size_t at = (size_t)snprintf(prof, sizeof(prof), "(");
+        char tb[128];
+        for (uint32_t k = 0; k < ft->count && at < sizeof(prof); k++)
+            at += (size_t)snprintf(
+                prof + at, sizeof(prof) - at, "%s%s", k ? "," : "",
+                lxs_tname(S, S->ts.param[ft->first + k].type, tb));
+        if (at < sizeof(prof))
+            snprintf(prof + at, sizeof(prof) - at, ")");
+    }
+    limba_id name;
+    limba_sym o = lxs_outer(S, s);
+    char ob[1400];
+    if (o) {
+        size_t ln, sn;
+        const char *on = limba_str(L->m, L->m->funcs[L->func_of[o]].name, &ln);
+        const char *sp = lxs_spell(S, s, &sn);
+        snprintf(ob, sizeof(ob), "%.*s/%.*s%s", (int)ln, on, (int)sn, sp, prof);
+        name = limba_str_intern(L->m, ob, strlen(ob));
+    } else {
+        name = ir_name(L, s, prof);
+    }
+    if (lxl_external(L, s)) {
+        /* a routine of C: an extern of the module, its symbol
+           the name as written unless name gives it */
+        const limba_lx_node *e = nd(L, x->d);
+        size_t ln, sn;
+        const char *lib = limba_strtab_get(L->S->lx->strings, e->a, &ln);
+        const char *sym = e->c ? limba_strtab_get(L->S->lx->strings, e->b, &sn)
+                               : lxs_spell(S, s, &sn);
+        limba_id eid = limba_extern_add(L->m, name, ext_type(L, s),
+                                        limba_str_intern(L->m, sym, sn),
+                                        limba_str_intern(L->m, lib, ln));
+        if (eid == LIMBA_NONE) {
+            name = ir_name(L, s, ".external");
+            eid = limba_extern_add(L->m, name, ext_type(L, s),
+                                   limba_str_intern(L->m, sym, sn),
+                                   limba_str_intern(L->m, lib, ln));
+        }
+        L->func_of[s] = eid;
+        return;
+    }
+    limba_id fid = limba_func_add(L->m, name, func_type(L, s), 0);
+    if (fid == LIMBA_NONE) {
+        if (o) {
+            strncat(ob, ".routine", sizeof(ob) - strlen(ob) - 1);
+            name = limba_str_intern(L->m, ob, strlen(ob));
+        } else {
+            name = ir_name(L, s, ".routine");
+        }
+        fid = limba_func_add(L->m, name, func_type(L, s), 0);
+    }
+    L->func_of[s] = fid;
+}
+
+/* the routines nested in routine node x, reached or not */
+static void declare_nested(lxl *L, const limba_lx_node *x, bool unreached)
+{
+    limba_lxs *S = L->S;
+    if (!x->d || nd(L, x->d)->kind != LXN_BODY)
+        return;
+    uint32_t locals = nd(L, x->d)->a;
+    for (uint32_t i = 0; i < list_n(L, locals); i++) {
+        const limba_lx_node *y = nd(L, list_at(L, locals, i));
+        if (y->kind != LXN_ROUTINE || !S->sym[y->a] || !y->d)
+            continue;
+        limba_sym m = S->sym[y->a];
+        if (lxs_outer(S, m) && reached(L, m) != unreached)
+            declare_routine(L, m, y);
+    }
+}
+
 /* the routines (those reached, or not) and the globals (the first time)
    of a declaration list */
 static void declare(lxl *L, uint32_t decls, bool unreached)
@@ -1461,51 +1570,9 @@ static void declare(lxl *L, uint32_t decls, bool unreached)
         const limba_lx_node *x = nd(L, d);
         if (x->kind == LXN_ROUTINE && S->sym[x->a] && x->d) {
             limba_sym s = S->sym[x->a];
-            if (reached(L, s) == unreached)
-                continue;
-            /* a routine of a name with more meanings: the types of its
-               parameters after the name (§ 8.8) */
-            char prof[700] = "";
-            if (lxs_ovl_is(S, s) || lxs_op_is(S, s)) {
-                const limba_typeinfo *ft = &S->ts.t[S->st.sym[s].type];
-                size_t at = (size_t)snprintf(prof, sizeof(prof), "(");
-                char tb[128];
-                for (uint32_t k = 0; k < ft->count && at < sizeof(prof); k++)
-                    at += (size_t)snprintf(
-                        prof + at, sizeof(prof) - at, "%s%s", k ? "," : "",
-                        lxs_tname(S, S->ts.param[ft->first + k].type, tb));
-                if (at < sizeof(prof))
-                    snprintf(prof + at, sizeof(prof) - at, ")");
-            }
-            limba_id name = ir_name(L, s, prof);
-            if (lxl_external(L, s)) {
-                /* a routine of C: an extern of the module, its symbol
-                   the name as written unless name gives it */
-                const limba_lx_node *e = nd(L, x->d);
-                size_t ln, sn;
-                const char *lib =
-                    limba_strtab_get(L->S->lx->strings, e->a, &ln);
-                const char *sym =
-                    e->c ? limba_strtab_get(L->S->lx->strings, e->b, &sn)
-                         : lxs_spell(S, s, &sn);
-                limba_id eid = limba_extern_add(
-                    L->m, name, ext_type(L, s), limba_str_intern(L->m, sym, sn),
-                    limba_str_intern(L->m, lib, ln));
-                if (eid == LIMBA_NONE) {
-                    name = ir_name(L, s, ".external");
-                    eid = limba_extern_add(L->m, name, ext_type(L, s),
-                                           limba_str_intern(L->m, sym, sn),
-                                           limba_str_intern(L->m, lib, ln));
-                }
-                L->func_of[s] = eid;
-                continue;
-            }
-            limba_id fid = limba_func_add(L->m, name, func_type(L, s), 0);
-            if (fid == LIMBA_NONE) {
-                name = ir_name(L, s, ".routine");
-                fid = limba_func_add(L->m, name, func_type(L, s), 0);
-            }
-            L->func_of[s] = fid;
+            if (reached(L, s) != unreached)
+                declare_routine(L, s, x);
+            declare_nested(L, x, unreached);
         } else if (x->kind == LXN_VAR && !unreached) {
             uint32_t names = x->a;
             for (uint32_t k = 0; k < list_n(L, names); k++) {
@@ -1539,10 +1606,26 @@ static void bodies(lxl *L, uint32_t u, uint32_t decls, const unsigned *off,
         if (x->kind != LXN_ROUTINE || !S->sym[x->a] || !x->d)
             continue;
         limba_sym s = S->sym[x->a];
-        if (lxl_external(L, s) || reached(L, s) != reach)
+        if (!lxl_external(L, s) && reached(L, s) == reach) {
+            L->suppress = off[u];
+            routine_body(L, s);
+        }
+        if (lxl_external(L, s) || nd(L, x->d)->kind != LXN_BODY)
             continue;
-        L->suppress = off[u];
-        routine_body(L, s);
+        /* its nested routines: the pragmas of its declarations hold in
+           them, theirs prevail (§ 10.3) */
+        uint32_t locals = nd(L, x->d)->a;
+        for (uint32_t k = 0; k < list_n(L, locals) && !L->stopped; k++) {
+            const limba_lx_node *y = nd(L, list_at(L, locals, k));
+            if (y->kind != LXN_ROUTINE || !S->sym[y->a] || !y->d)
+                continue;
+            limba_sym m = S->sym[y->a];
+            if (!lxs_outer(S, m) || reached(L, m) != reach)
+                continue;
+            L->suppress = off[u];
+            pragmas(L, locals);
+            routine_body(L, m);
+        }
     }
 }
 
@@ -1580,6 +1663,7 @@ limba_module *limba_lxl_program_each(limba_lxs *S,
     L->node_pos = limba_xcalloc(S->t->nnode + 1, sizeof(*L->node_pos));
     L->eq_of = limba_xcalloc(S->ts.n + 1, sizeof(*L->eq_of));
     scan_taken(L);
+    lxl_nest_prepare(L);
     /* the files in the order of their initialisations, the program last
        (§ 11.5); the checks each file turns off for the whole of it */
     uint32_t nu = S->nunits;
@@ -1719,6 +1803,7 @@ done:
     free(L->eq_of);
     free(L->lvn);
     free(L->via);
+    lxl_nest_free(L);
     free(files);
     free(off);
     if (S->rep->errors) {

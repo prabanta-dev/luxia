@@ -393,6 +393,7 @@ void lxs_routine_body(limba_lxs *S, limba_sym routine)
     }
     uint32_t locals = lxs_node(S, body)->a, stmts = lxs_node(S, body)->b;
     lxs_declare_all(S, locals, scope, false);
+    lxs_nested_declared(S, routine, locals);
     lxs_resolve_all(S, locals);
     for (uint32_t i = 0; i < lxs_node(S, locals)->b; i++) {
         uint32_t d = limba_lx_list_at(S->t, locals, i);
@@ -404,6 +405,8 @@ void lxs_routine_body(limba_lxs *S, limba_sym routine)
                 lxs_pragma(S, d);
         }
     }
+    /* the routines nested in it, before its statements (§ 8.9) */
+    lxs_nested_bodies(S, routine, locals, scope);
     S->result = sig ? lxs_ty(S, sig)->elem : S->ts.void_;
     S->in_routine = true;
     S->loops = 0;

@@ -24,7 +24,7 @@ LX_ERROR(13, PREFIX_PARENS)     /* a * -b, 2 ** -1, not -a */
 LX_ERROR(14, PREFIX_POWER)      /* not a ** b */
 LX_ERROR(15, END_NAME)          /* end Other, closing routine Name */
 LX_ERROR(16, NOT_A_STATEMENT)   /* neither an assignment nor a call */
-LX_ERROR(17, NESTED_ROUTINE)    /* a routine inside a routine */
+LX_ERROR(17, NESTED_ROUTINE)    /* a routine inside a nested one (§ 8.9) */
 LX_ERROR(18, EMPTY_STATEMENT)   /* ;; */
 LX_ERROR(19, AFTER_END)         /* text after the final end. */
 LX_ERROR(20, END_ALIGN)         /* warning: end not under its opening */

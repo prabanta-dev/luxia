@@ -150,8 +150,18 @@ typedef struct {
     uint32_t who; /* the caller, as in limba_lxs_use */
     limba_sym routine;
     limba_sym var;
-    uint32_t node; /* the argument */
+    uint32_t node;  /* the argument */
+    limba_sym host; /* a variable of routine host given to a routine
+                       nested in it (§ 8.9); 0 for a variable of a file */
 } limba_lxs_galias;
+
+/* a variable or a parameter of a routine read or written by a routine
+   nested in it (§ 8.9) */
+typedef struct {
+    limba_sym nested, var;
+    uint32_t node;
+    bool write;
+} limba_lxs_capture;
 
 typedef struct {
     limba_lx_ast *t;
@@ -261,6 +271,15 @@ typedef struct {
     /* the variables of a file given by address to a routine (§ 8.1) */
     limba_lxs_galias *galias;
     uint32_t ngalias, capgalias;
+    /* nested routines (§ 8.9): per routine symbol the routine it is
+       nested in (0: one of a file); the nested routine being checked
+       (0: none); what the nested routines read and write of the
+       routines that contain them */
+    limba_sym *outer;
+    uint32_t nouter;
+    limba_sym nest;
+    limba_lxs_capture *caps;
+    uint32_t ncaps, capcaps;
 } limba_lxs;
 
 void limba_lxs_init(limba_lxs *S, limba_lx_ast *t, limba_lx *lx,
@@ -397,6 +416,8 @@ void lxs_op_bind(limba_lxs *S);
 void lxs_op_check(limba_lxs *S);
 /* is s an operator */
 bool lxs_op_is(const limba_lxs *S, limba_sym s);
+/* is the routine node d an operator, or a str added for a type */
+bool lxs_op_named(limba_lxs *S, uint32_t d);
 /* the operator defined for op (a token kind, = for <>) that the operands
    take, 0 if none (the predefined one then); pt the type the predefined
    operator would work in, 0 if it does not apply: a defined operator with
@@ -415,6 +436,24 @@ void lxs_op_uses(limba_lxs *S, limba_ltype t, uint32_t node);
 
 /* is the routine s overloaded: overload written on it */
 bool lxs_ovl_is(const limba_lxs *S, limba_sym s);
+/* the routines of a declaration list of a routine (nested, § 8.9):
+   overload where it is needed, the clashes, overload alone */
+void lxs_ovl_check_list(limba_lxs *S, uint32_t list, uint32_t scope);
+
+/* nested routines (sema_nested.c, § 8.9) */
+/* the routine s is nested in, 0 if it is one of a file */
+limba_sym lxs_outer(const limba_lxs *S, limba_sym s);
+/* the scope around the routine nested routine s is in, where the names
+   outside it are looked up (the part of its file); 0 for one of a file */
+uint32_t lxs_outer_scope(const limba_lxs *S, limba_sym s);
+/* the variable or parameter s, read or written at node: kept when the
+   routine being checked is nested and s is of the routine around it */
+void lxs_capture(limba_lxs *S, limba_sym s, uint32_t node, bool write);
+/* the routines declared in the list of routine r: nested in it, those
+   not allowed reported (L0017); then each checked, after its heading */
+void lxs_nested_declared(limba_lxs *S, limba_sym r, uint32_t list);
+void lxs_nested_bodies(limba_lxs *S, limba_sym r, uint32_t list,
+                       uint32_t scope);
 
 /* declarations and types (sema.c) */
 limba_sym lxs_lookup(limba_lxs *S, uint32_t scope, uint32_t node);

@@ -1,0 +1,29 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+//
+// The names in the IR of nested routines: the routine around them, '/',
+// their own name (written quoted in the text); the environment a typed
+// slot, its address the first parameter
+program NestedNames;
+
+type Row = record amount: Int64; end;
+
+procedure Report(rows: array[Int32 range <>] of Row; title: String);
+var total: Int64 := 0;
+
+  procedure Line(r: Row);
+  begin
+    total := total + r.amount;
+    writeln(title, ": ", r.amount);
+  end Line;
+
+begin
+  for var i: Int32 := low(rows) to high(rows) do
+    Line(rows[i]);
+  end;
+  writeln(total);
+end Report;
+
+begin
+  Report({{amount: 1}, {amount: 2}}, "row");
+end NestedNames.

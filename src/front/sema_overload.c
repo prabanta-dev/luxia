@@ -228,6 +228,30 @@ static bool clash(limba_lxs *S, limba_sym a, limba_sym b, uint32_t *k)
     return true;
 }
 
+/* is there a routine nested in a routine of the scope of h, of its name,
+   that says overload: it joins h (§ 5.4) */
+static bool nested_joins(limba_lxs *S, limba_sym h)
+{
+    uint32_t scope = S->st.sym[h].scope, name = S->st.sym[h].name;
+    for (limba_sym r = 1; r < S->st.nsym; r++) {
+        const limba_symbol *y = &S->st.sym[r];
+        if (y->kind != LIMBA_LSYM_ROUTINE || y->scope != scope || !y->node)
+            continue;
+        uint32_t body = lxs_node(S, y->node)->d;
+        if (!body || lxs_node(S, body)->kind != LXN_BODY)
+            continue;
+        uint32_t list = lxs_node(S, body)->a;
+        for (uint32_t i = 0; i < lxs_node(S, list)->b; i++) {
+            limba_lx_node *x = lxs_node(S, limba_lx_list_at(S->t, list, i));
+            if (x->kind == LXN_ROUTINE && (x->flags & LXN_F_OVERLOAD) &&
+                lxs_node(S, x->a)->kind == LXN_NAME &&
+                lxs_node(S, x->a)->a == name)
+                return true;
+        }
+    }
+    return false;
+}
+
 /* does the routine h, alone in its file, join others of its name: one of
    an interface may join those of other units in the files that use it;
    one of a program or an implementation those of the units its file uses
@@ -236,8 +260,24 @@ static bool joins(limba_lxs *S, limba_sym h)
 {
     bool impl;
     uint32_t scope = S->st.sym[h].scope;
+    limba_sym o = lxs_outer(S, h);
+    if (o) {
+        /* a nested routine: the routines of its name outside, when they
+           say overload (§ 5.4) */
+        uint32_t file = lxs_outer_scope(S, h);
+        limba_sym f = limba_sym_lookup(&S->st, file, S->st.sym[h].name);
+        if (f && S->st.sym[f].kind == LIMBA_LSYM_ROUTINE && lxs_ovl_is(S, f))
+            return true;
+        if (f && S->st.sym[f].scope != S->universe &&
+            lxs_unit_of(S, S->st.sym[f].scope, &impl) ==
+                lxs_unit_of(S, file, &impl))
+            return false; /* a name of the file hides those of the units */
+        scope = file;
+    }
     uint32_t u = lxs_unit_of(S, scope, &impl);
-    if (S->nunits && scope == S->units[u].intf)
+    if (!o && S->nunits && scope == S->units[u].intf)
+        return true;
+    if (!o && nested_joins(S, h))
         return true;
     limba_sym *heads;
     uint8_t *levels;
@@ -250,59 +290,77 @@ static bool joins(limba_lxs *S, limba_sym h)
     return any;
 }
 
+/* the routines of the name of h, the first: overload alone, clashes,
+   external ones without a symbol */
+static void check_head(limba_lxs *S, limba_sym h)
+{
+    if (!lxs_ovl_next(S, h)) {
+        if (lxs_ovl_is(S, h) && !lxs_op_listed(S, h) && !joins(S, h)) {
+            uint32_t n;
+            const char *sp = name_text(S, h, &n);
+            limba_report_add(S->rep, LIMBA_WARNING, LXE_LONE_OVERLOAD,
+                             S->st.sym[h].loc, S->st.sym[h].len,
+                             "'%.*s' has no other meaning: overload is "
+                             "for a name with more",
+                             (int)n, sp);
+        }
+        return;
+    }
+    for (limba_sym b = lxs_ovl_next(S, h); b; b = lxs_ovl_next(S, b))
+        for (limba_sym a = h; a != b; a = lxs_ovl_next(S, a)) {
+            uint32_t k = 0;
+            if (!clash(S, a, b, &k))
+                continue;
+            uint32_t n;
+            const char *sp = name_text(S, b, &n);
+            limba_report_add(
+                S->rep, LIMBA_ERROR, LXE_OVERLOAD_CLASH, S->st.sym[b].loc,
+                S->st.sym[b].len,
+                "'%.*s' cannot be told from another '%.*s' when called "
+                "with %u argument%s: their parameters have the same types",
+                (int)n, sp, (int)n, sp, k, k == 1 ? "" : "s");
+            lxs_note(S, S->st.sym[a].loc, S->st.sym[a].len, "the other one");
+            break;
+        }
+    for (limba_sym m = h; m; m = lxs_ovl_next(S, m)) {
+        uint32_t e = lxs_node(S, S->st.sym[m].node)->d;
+        if (e && lxs_node(S, e)->kind == LXN_EXTERNAL && !lxs_node(S, e)->c) {
+            uint32_t n;
+            const char *sp = name_text(S, m, &n);
+            limba_report_add(S->rep, LIMBA_ERROR, LXE_OVERLOAD_EXTERNAL,
+                             S->st.sym[m].loc, S->st.sym[m].len,
+                             "'%.*s' has more meanings: give the C "
+                             "symbol with name \"symbol\"",
+                             (int)n, sp);
+        }
+    }
+}
+
 void lxs_ovl_check(limba_lxs *S)
 {
     uint8_t *inner = limba_xcalloc(S->st.nsym + 1, 1);
     for (limba_sym s = 1; s < S->st.nsym && s < S->novl; s++)
         if (S->ovl_next[s])
             inner[S->ovl_next[s]] = 1;
-    for (limba_sym h = 1; h < S->st.nsym; h++) {
-        if (inner[h] || S->st.sym[h].kind != LIMBA_LSYM_ROUTINE)
-            continue;
-        if (!lxs_ovl_next(S, h)) {
-            if (lxs_ovl_is(S, h) && !lxs_op_listed(S, h) && !joins(S, h)) {
-                uint32_t n;
-                const char *sp = name_text(S, h, &n);
-                limba_report_add(S->rep, LIMBA_WARNING, LXE_LONE_OVERLOAD,
-                                 S->st.sym[h].loc, S->st.sym[h].len,
-                                 "'%.*s' has no other meaning: overload is "
-                                 "for a name with more",
-                                 (int)n, sp);
-            }
-            continue;
-        }
-        for (limba_sym b = lxs_ovl_next(S, h); b; b = lxs_ovl_next(S, b))
-            for (limba_sym a = h; a != b; a = lxs_ovl_next(S, a)) {
-                uint32_t k = 0;
-                if (!clash(S, a, b, &k))
-                    continue;
-                uint32_t n;
-                const char *sp = name_text(S, b, &n);
-                limba_report_add(
-                    S->rep, LIMBA_ERROR, LXE_OVERLOAD_CLASH, S->st.sym[b].loc,
-                    S->st.sym[b].len,
-                    "'%.*s' cannot be told from another '%.*s' when called "
-                    "with %u argument%s: their parameters have the same types",
-                    (int)n, sp, (int)n, sp, k, k == 1 ? "" : "s");
-                lxs_note(S, S->st.sym[a].loc, S->st.sym[a].len,
-                         "the other one");
-                break;
-            }
-        for (limba_sym m = h; m; m = lxs_ovl_next(S, m)) {
-            uint32_t e = lxs_node(S, S->st.sym[m].node)->d;
-            if (e && lxs_node(S, e)->kind == LXN_EXTERNAL &&
-                !lxs_node(S, e)->c) {
-                uint32_t n;
-                const char *sp = name_text(S, m, &n);
-                limba_report_add(S->rep, LIMBA_ERROR, LXE_OVERLOAD_EXTERNAL,
-                                 S->st.sym[m].loc, S->st.sym[m].len,
-                                 "'%.*s' has more meanings: give the C "
-                                 "symbol with name \"symbol\"",
-                                 (int)n, sp);
-            }
-        }
-    }
+    for (limba_sym h = 1; h < S->st.nsym; h++)
+        if (!inner[h] && S->st.sym[h].kind == LIMBA_LSYM_ROUTINE)
+            check_head(S, h);
     free(inner);
+}
+
+void lxs_ovl_check_list(limba_lxs *S, uint32_t list, uint32_t scope)
+{
+    for (uint32_t i = 0; i < lxs_node(S, list)->b; i++) {
+        uint32_t d = limba_lx_list_at(S->t, list, i);
+        limba_lx_node *x = lxs_node(S, d);
+        if (x->kind != LXN_ROUTINE || !S->sym[x->a] ||
+            lxs_node(S, x->a)->kind != LXN_NAME)
+            continue;
+        limba_sym m = S->sym[x->a];
+        /* the first of its name: the one a lookup finds */
+        if (limba_sym_local(&S->st, scope, lxs_node(S, x->a)->a) == m)
+            check_head(S, m);
+    }
 }
 
 /* ---- the choice of a call ---- */
@@ -450,6 +508,7 @@ typedef struct {
     limba_sym *m;
     uint8_t *level;
     uint32_t n, cap, capl;
+    uint8_t lib; /* the level of the units of the library */
 } cands;
 
 static void add_cand(cands *c, limba_sym m, uint8_t level)
@@ -476,7 +535,7 @@ static void add_chain(limba_lxs *S, cands *c, limba_sym h, uint8_t level,
         for (uint32_t i = 0; i < c->n && !hidden; i++)
             if (c->level[i] < level && lxs_ovl_homograph(S, c->m[i], m)) {
                 hidden = true;
-                if (level == 2 && c->level[i] == 1 && at) {
+                if (level == c->lib && c->level[i] == c->lib - 1 && at) {
                     uint32_t n;
                     const char *sp = name_text(S, m, &n);
                     limba_report_add(
@@ -505,31 +564,54 @@ limba_sym lxs_ovl_choose(limba_lxs *S, uint32_t node, uint32_t scope,
     bool ci;
     uint32_t cu = lxs_unit_of(S, scope, &ci);
     cands C = {0};
+    C.lib = 2;
+    uint8_t base = 0;
+    uint32_t lscope = scope; /* where the names are looked up */
+    limba_sym o = lxs_outer(S, s);
+    if (o && merge) {
+        /* a nested routine with overload: one name with the routines
+           outside that say overload, hiding those with its parameters
+           (§ 5.4) */
+        add_chain(S, &C, s, 0, cu, callee);
+        uint32_t file = lxs_outer_scope(S, s);
+        limba_sym f = limba_sym_lookup(&S->st, file, S->st.sym[s].name);
+        bool fi;
+        /* a name of the file that does not say overload hides the rest */
+        if (f && S->st.sym[f].scope != S->universe &&
+            lxs_unit_of(S, S->st.sym[f].scope, &fi) == cu &&
+            (S->st.sym[f].kind != LIMBA_LSYM_ROUTINE || !lxs_ovl_is(S, f)))
+            merge = false;
+        lscope = file;
+        base = 1;
+        C.lib = 3;
+    }
     if (merge) {
         /* the routines of the name in the file and in the units it uses,
            one name when each says overload (§ 8.8, § 11.3) */
         uint32_t name = S->st.sym[s].name;
-        limba_sym f = limba_sym_lookup(&S->st, scope, name);
+        limba_sym f = limba_sym_lookup(&S->st, lscope, name);
         bool fi;
+        uint32_t n0 = C.n;
         if (f && S->st.sym[f].scope != S->universe &&
             lxs_unit_of(S, S->st.sym[f].scope, &fi) == cu)
-            add_chain(S, &C, f, 0, cu, callee);
+            add_chain(S, &C, f, base, cu, callee);
         limba_sym *heads;
         uint8_t *levels;
-        uint32_t nh = lxs_unit_heads(S, scope, name, &heads, &levels);
+        uint32_t nh = lxs_unit_heads(S, lscope, name, &heads, &levels);
         bool all = true;
         for (uint32_t i = 0; i < nh; i++)
             all = all && lxs_ovl_is(S, heads[i]);
-        if (C.n || all)
+        if (C.n > n0 || all)
             for (uint8_t lev = 1; lev <= 2 && all; lev++)
                 for (uint32_t i = 0; i < nh; i++)
                     if (levels[i] == lev)
-                        add_chain(S, &C, heads[i], lev, cu, callee);
+                        add_chain(S, &C, heads[i], (uint8_t)(base + lev), cu,
+                                  callee);
         free(heads);
         free(levels);
-        if (!all && !C.n)
-            add_chain(S, &C, s, 0, cu, callee);
-    } else {
+        if (!all && C.n == n0 && !o)
+            add_chain(S, &C, s, base, cu, callee);
+    } else if (!o || !C.n) {
         add_chain(S, &C, s, 0, cu, callee);
     }
     limba_sym *cand = C.m, *ok = NULL;

@@ -135,10 +135,16 @@ void lxs_alias_call(limba_lxs *S, limba_sym s, const uint32_t *given,
         if (!ns[j])
             continue;
         limba_sym v = S->sym[st[j][0]];
+        limba_sym host = lxs_outer(S, s);
         if (file_var(S, v)) {
             LIMBA_GROW(S->galias, S->ngalias, S->capgalias);
             S->galias[S->ngalias++] =
-                (limba_lxs_galias){S->who, s, v, given[j]};
+                (limba_lxs_galias){S->who, s, v, given[j], 0};
+        } else if (host && v && S->st.sym[v].scope == S->st.sym[host].value) {
+            /* a variable of the routine s is nested in (§ 8.1, § 8.9) */
+            LIMBA_GROW(S->galias, S->ngalias, S->capgalias);
+            S->galias[S->ngalias++] =
+                (limba_lxs_galias){S->who, s, v, given[j], host};
         }
         for (uint32_t i = 0; i < j; i++) {
             limba_param q = S->ts.param[first + i];
