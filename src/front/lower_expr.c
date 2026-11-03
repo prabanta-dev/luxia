@@ -411,50 +411,24 @@ static limba_id arith(lxl *L, uint32_t node, unsigned op, limba_ltype t,
                        : op == LX_MINUS ? LIMBA_OP_SUB
                                         : LIMBA_OP_MUL,
                        it, a, b);
-        if (sg && !lxl_overflow_checked(L))
+        if (!lxl_overflow_checked(L))
             return bin(L,
                        op == LX_PLUS    ? LIMBA_OP_ADD
                        : op == LX_MINUS ? LIMBA_OP_SUB
                                         : LIMBA_OP_MUL,
                        it, a, b);
+        /* checked: the .ov of the IR, with or without a sign (trap 6) */
         if (sg)
             return bin(L,
                        op == LX_PLUS    ? LIMBA_OP_ADDOV
                        : op == LX_MINUS ? LIMBA_OP_SUBOV
                                         : LIMBA_OP_MULOV,
                        it, a, b);
-        /* a number without a sign: its own checks */
-        if (op == LX_PLUS) {
-            limba_id r = bin(L, LIMBA_OP_ADD, it, a, b);
-            lxl_check(L, cmp(L, false, LIMBA_CC_UGE, r, a), LXR_OVERFLOW);
-            return r;
-        }
-        if (op == LX_MINUS) {
-            lxl_check(L, cmp(L, false, LIMBA_CC_UGE, a, b), LXR_OVERFLOW);
-            return bin(L, LIMBA_OP_SUB, it, a, b);
-        }
-        if (bits < 64) {
-            limba_id wa = un(L, LIMBA_OP_ZEXT, LIMBA_T_I64, a);
-            limba_id wb = un(L, LIMBA_OP_ZEXT, LIMBA_T_I64, b);
-            limba_id p = bin(L, LIMBA_OP_MUL, LIMBA_T_I64, wa, wb);
-            lxl_check(
-                L,
-                cmp(L, false, LIMBA_CC_ULE, p,
-                    lxl_iconst(L, LIMBA_T_I64, (int64_t)((1ull << bits) - 1))),
-                LXR_OVERFLOW);
-            return un(L, LIMBA_OP_TRUNC, it, p);
-        } else {
-            limba_id r = bin(L, LIMBA_OP_MUL, it, a, b);
-            limba_id zero = lxl_iconst(L, it, 0), one = lxl_iconst(L, it, 1);
-            limba_id bz = cmp(L, false, LIMBA_CC_EQ, b, zero);
-            uint32_t so[3] = {bz, one, b};
-            limba_id d = lxl_emit(L, LIMBA_OP_SELECT, it, 0, 0, 0, so, 3);
-            limba_id q = bin(L, LIMBA_OP_UDIV, it, r, d);
-            limba_id ok = bin(L, LIMBA_OP_OR, LIMBA_T_I1, bz,
-                              cmp(L, false, LIMBA_CC_EQ, q, a));
-            lxl_check(L, ok, LXR_OVERFLOW);
-            return r;
-        }
+        return bin(L,
+                   op == LX_PLUS    ? LIMBA_OP_UADDOV
+                   : op == LX_MINUS ? LIMBA_OP_USUBOV
+                                    : LIMBA_OP_UMULOV,
+                   it, a, b);
     case LX_KW_DIV:
     case LX_KW_MOD:
     case LX_KW_REM: {

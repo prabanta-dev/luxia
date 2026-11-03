@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- IR version 9 of Limba: the arithmetic of `UInt8`..`UInt64` uses the
+  unsigned overflow operations of the IR (`uadd.ov`, `usub.ov`,
+  `umul.ov`, trap 6) in place of its own checks; the sizes of pointers,
+  strings and open arrays follow the width of a pointer of the module
+  (`ptr_bits`, 64 on every target known). A read of freed memory with
+  its check off is a wrong module for `lir_run`.
 - `luxia` runs on Meri with exceptions in the VM: under AddressSanitizer
   it lets Meri handle the faults of a run, so an access the IR left
   unchecked (`--suppress=nil_check,dangling_check`) ends as a wrong

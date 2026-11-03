@@ -11,9 +11,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* pointers, strings and open arrays: the sizes of a 64-bit target; the
-   IR lowers them, these serve sizeof and the layout of records */
-#define PTR_SIZE 8
+/* pointers, strings and open arrays: the width of a pointer of the
+   target, ts->ptr_size bytes; the IR lowers them, these serve sizeof and
+   the layout of records. Every target known today has pointers of 64
+   bits (limba_target_ptr_bits); the module is given the same width */
+#define PTR_SIZE (ts->ptr_size)
 
 static limba_ltype add(limba_types *ts, unsigned kind, unsigned flags,
                        uint64_t size, uint32_t align)
@@ -34,6 +36,7 @@ static limba_ltype add(limba_types *ts, unsigned kind, unsigned flags,
 void limba_types_init(limba_types *ts)
 {
     memset(ts, 0, sizeof(*ts));
+    ts->ptr_size = 8;
     add(ts, LIMBA_LTK_ERROR, 0, 0, 1);
     ts->void_ = add(ts, LIMBA_LTK_VOID, 0, 0, 1);
     ts->uint = add(ts, LIMBA_LTK_UINT, 0, 0, 1);

@@ -89,6 +89,8 @@ typedef struct {
     limba_param *param;
     uint32_t nparam, capparam;
     limba_ltype void_, uint, ureal, nil, bool_, char_, string, bigint;
+    uint32_t ptr_size; /* bytes of a pointer, String, BigInt: the module's
+                          ptr_bits / 8 */
 } limba_types;
 
 void limba_types_init(limba_types *ts);

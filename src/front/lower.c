@@ -160,7 +160,7 @@ limba_id lxl_emit(lxl *L, unsigned op, limba_id type, unsigned cc, int64_t imm,
     if (limba_ops[op].flags & LIMBA_OPF_CALL)
         L->ncalls++; /* it may free: a dangling check is due again */
     if (!(limba_ops[op].flags & LIMBA_OPF_PURE) || op == LIMBA_OP_PARAM ||
-        op == LIMBA_OP_UNDEF || type == LIMBA_T_VOID || nops > 3)
+        type == LIMBA_T_VOID || nops > 3)
         return limba_inst_add(f, L->cur, op, type, cc, imm, imm2, ops, nops);
     uint64_t h = limba_mix(LIMBA_FNV_SEED,
                            (uint64_t)op << 40 ^ (uint64_t)cc << 32 ^ type);
@@ -1563,6 +1563,8 @@ limba_module *limba_lxl_program_each(limba_lxs *S,
     L->done = done;
     L->ctx = ctx;
     L->m = limba_module_new();
+    /* the layouts of the types follow the width of a pointer */
+    limba_module_ptr_bits(L->m, 8 * S->ts.ptr_size);
     /* its traps are worded as Luxia says them: the texts of traps.def */
     L->m->language = limba_str_intern(L->m, "luxia", 5);
     /* C types by name or the C layout: bound to the platform (§ 3.13) */

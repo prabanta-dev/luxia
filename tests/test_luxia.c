@@ -1343,10 +1343,13 @@ static const run_case
              "x: Int32); begin dispose(q); x := 2; end k; begin q := new(R);\n  "
              "k(q.a);\nend t.",
              "", "trap 105 at 2:3"},
+            /* the check off: no trap 105; the read is undefined (§ 10.3), and
+               lir_run calls a read of freed memory a wrong module (Limba
+               fe092ed) */
             {"program t; pragma suppress(dangling_check); type R = record a: Int32; "
              "end; var q: ^R; begin q := new(R); q.a := 3; dispose(q); writeln(q.a); "
              "end t.",
-             "3\n", "ok"},
+             "", "status 5"},
             /* arrays made by new: a vector that grows with move, Strings,
                overlapping moves, bounds, an empty one (§ 3.10, § 9.5, § 9.7) */
             {"program t;\ntype Items = array[Int64 range <>] of Int64; ItemsRef = "
