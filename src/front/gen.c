@@ -26,6 +26,16 @@
  * by zero, 100 index, 101 range, 103 conversion, 104 shift. A BigInt is
  * computed with bigint.c, the arithmetic of lir_run too: this net watches
  * the front end and the back ends on it, test_front watches bigint.c.
+ *
+ * Some routines have routines nested in them (§ 8.9): the first gives a
+ * value to variables of the routine's declarations, which have none, and
+ * is called first; a second changes one of them later. Some functions
+ * give their profile to a procedural type (§ 3.15), sometimes two types
+ * of it with conversions between them: global variables of those types,
+ * ready with a function or nil, and a typed constant table, are called
+ * through (102 for nil, checked before the arguments), compared and
+ * given new values; only procedures and the program call through them,
+ * and only functions are values, so no call through a value comes back.
  */
 #include "gen.h"
 
@@ -151,7 +161,9 @@ enum {
     K_PTR,
     K_ENUM,
     K_DYN,
-    K_HEAP
+    K_HEAP,
+    K_PROC /* a procedural type (§ 3.15): index the function whose profile
+              it has; its values are a routine + 1, nil 0 */
 };
 
 typedef struct {
@@ -248,11 +260,17 @@ enum {
     E_ARG,    /* arg(a) */
     E_HIDX,   /* element a of the array made by new variable var points to */
     E_HLEN,   /* low (op 0), high (1) or length (2) of var^, made by new */
-    E_AGG     /* an aggregate of record or array type t (§ 6.8): the values
+    E_AGG,    /* an aggregate of record or array type t (§ 6.8): the values
                  args, in the order written; by index (op 1) the index
                  literals in list a and the high ends in list b (0 for one
                  index); c the value of else, 0 for none; computed into the
                  hidden variable var */
+    E_ICALL,  /* a call through the procedural variable var (op 0), or the
+                 element lit of the table var (op 1) of group fn: args by
+                 position (§ 3.15) */
+    E_PVAL    /* a value of procedural type t: routine fn (op 0), nil (1),
+                 variable var (2), var converted to t (3), element lit of
+                 the table var (4) */
 };
 
 /* a call of a function whose result is a record or an array has in var
@@ -316,7 +334,9 @@ enum {
        program: declared, filled by two for, sometimes scaled through an
        open parameter of two indices, an element and its bounds written,
        its total by the open parameter; mat[fld] holds the numbers */
-    S_MAT
+    S_MAT,
+    /* the nested routine var (0 or 1) of routine fn called (§ 8.9) */
+    S_NCALL
 };
 
 typedef struct {
@@ -390,7 +410,26 @@ typedef struct {
        one of the globals among them (§ 8.1: an alias, L0102) */
     uint8_t *touch;
     uint32_t ntouch;
+    /* routines nested in it (§ 8.9): the first assigns the variables of
+       its declarations (dvar, no initial value), the second changes one
+       of them; named q(2 * routine + k) */
+    uint32_t dvar[3];
+    uint8_t ndvar, nnest;
+    uint32_t nblk_[2], nn_[2];
 } xr;
+
+/* procedural values (§ 3.15): one type, or two of the same profile,
+   the profile of function proto; the functions of that profile; global
+   variables of the types (their initial routine + 1, 0 nil) and
+   sometimes a typed constant table of the first type, two elements */
+typedef struct {
+    uint32_t ty[2], nty;
+    uint32_t proto;
+    uint32_t cand[6], ncand;
+    uint32_t slot[3], nslot;
+    uint32_t init[3];
+    uint32_t tab, tabv[2];
+} xproc;
 
 typedef struct {
     uint64_t s;
@@ -456,6 +495,8 @@ typedef struct {
         uint32_t line, col;
     } *mat;
     uint32_t nmat, capmat;
+    xproc *pr;
+    uint32_t npr, cappr;
 } G;
 
 static uint32_t new_str(G *g, const char *b, size_t n)
@@ -908,6 +949,15 @@ static void touched(G *g, uint32_t id, uint32_t e0, uint32_t s0)
             const xr *c = &g->r[g->e[i].fn];
             for (uint32_t v = 0; v < c->ntouch; v++)
                 r->touch[v] |= c->touch[v];
+        }
+        if (g->e[i].k == E_ICALL) {
+            /* every function of the profile, made before */
+            const xproc *q = &g->pr[g->e[i].fn];
+            for (uint32_t k = 0; k < q->ncand; k++) {
+                const xr *c = &g->r[q->cand[k]];
+                for (uint32_t v = 0; v < c->ntouch && v < g->nv; v++)
+                    r->touch[v] |= c->touch[v];
+            }
         }
     }
     for (uint32_t i = s0; i < g->ns; i++) {
@@ -2581,6 +2631,186 @@ static uint32_t big_expr(G *g, int d, bool need_var)
     return conv(g, T_BIG, expr(g, from, d - 1, true));
 }
 
+/* ---- procedural values (§ 3.15) ---- */
+
+/* a function whose profile a procedural type may take: parameters
+   without a mode, of scalar types (no pointer), a scalar result */
+static bool proc_profile(const G *g, uint32_t r)
+{
+    const xr *x = &g->r[r];
+    if (!x->func || x->opk || x->isstr || !is_scalar(g, x->rt) ||
+        is_ptr(g, x->rt))
+        return false;
+    for (uint32_t k = 0; k < x->np; k++) {
+        const xv *p = &g->v[x->par[k]];
+        if (p->kind != V_IN || !is_scalar(g, p->t) || is_ptr(g, p->t))
+            return false;
+    }
+    return true;
+}
+
+static bool same_profile(const G *g, uint32_t a, uint32_t b)
+{
+    const xr *x = &g->r[a], *y = &g->r[b];
+    if (x->np != y->np || x->rt != y->rt)
+        return false;
+    for (uint32_t k = 0; k < x->np; k++)
+        if (g->v[x->par[k]].t != g->v[y->par[k]].t)
+            return false;
+    return true;
+}
+
+/* after routine id: sometimes a group of procedural values for its
+   profile, or one more function joins the group of its profile */
+static void proc_group(G *g, uint32_t id)
+{
+    if (!proc_profile(g, id))
+        return;
+    for (uint32_t i = 0; i < g->npr; i++) {
+        xproc *q = &g->pr[i];
+        if (same_profile(g, q->proto, id)) {
+            if (q->ncand < 6)
+                q->cand[q->ncand++] = id;
+            return;
+        }
+    }
+    if (!chance(g, 45))
+        return;
+    LIMBA_GROW(g->pr, g->npr, g->cappr);
+    xproc *q = &g->pr[g->npr++];
+    memset(q, 0, sizeof(*q));
+    q->proto = id;
+    q->cand[q->ncand++] = id;
+    q->nty = chance(g, 35) ? 2 : 1;
+    for (uint32_t k = 0; k < q->nty; k++)
+        q->ty[k] = new_type(g, (xt){K_PROC, T_I64, id, 0, 0, 0, 0, 0});
+    q->nslot = 1 + below(g, 3);
+    for (uint32_t k = 0; k < q->nslot; k++) {
+        q->slot[k] = new_v(g, q->ty[k % q->nty], V_GLOBAL);
+        q->init[k] = chance(g, 90) ? id + 1 : 0;
+    }
+    if (chance(g, 40)) {
+        q->tab = new_v(g, q->ty[0], V_GLOBAL);
+        q->tabv[0] = q->tabv[1] = id;
+    }
+}
+
+/* element k (from 1) of the table variable tab: its routine */
+static uint32_t tab_value(const G *g, uint32_t tab, uint32_t k)
+{
+    for (uint32_t i = 0; i < g->npr; i++)
+        if (g->pr[i].tab == tab)
+            return g->pr[i].tabv[k - 1];
+    return 0;
+}
+
+/* the groups whose functions give a value of base t; one, -1 if none */
+static int pick_group(G *g, unsigned t)
+{
+    uint32_t n = 0, chosen = 0;
+    for (uint32_t i = 0; i < g->npr; i++)
+        if (base(g, g->r[g->pr[i].proto].rt) == t && below(g, ++n) == 0)
+            chosen = i;
+    return n ? (int)chosen : -1;
+}
+
+/* a call through a value of group q: a variable, or the table */
+static uint32_t icall_expr(G *g, uint32_t q, int d)
+{
+    const xproc *pq = &g->pr[q];
+    uint32_t proto = pq->proto, np = g->r[proto].np;
+    bool tab = pq->tab && chance(g, 30);
+    uint32_t a[4], order[4];
+    for (uint32_t k = 0; k < np; k++) {
+        a[k] = value_for(g, g->v[g->r[proto].par[k]].t, d - 1);
+        order[k] = k;
+    }
+    pq = &g->pr[q];
+    uint32_t i = new_e(g, E_ICALL, g->r[proto].rt);
+    g->e[i].fn = q;
+    g->e[i].op = tab;
+    g->e[i].var = tab ? pq->tab : pq->slot[below(g, pq->nslot)];
+    g->e[i].lit = 1 + below(g, 2);
+    g->e[i].args = keep_list(g, a, np);
+    g->e[i].nargs = np;
+    g->e[i].pmap = keep_list(g, order, np);
+    return i;
+}
+
+/* a value for variable slot of group q: a function of the profile, nil,
+   another variable of its type, one of the other type converted, an
+   element of the table */
+static uint32_t pval_expr(G *g, uint32_t q, uint32_t slot, bool simple)
+{
+    const xproc *pq = &g->pr[q];
+    uint32_t t = g->v[slot].t;
+    uint32_t i = new_e(g, E_PVAL, t);
+    unsigned c = below(g, 10);
+    uint32_t other = pq->slot[below(g, pq->nslot)];
+    if (c < 5 || simple) {
+        g->e[i].op = c == 4 ? 1 : 0;
+        g->e[i].fn = pq->cand[below(g, pq->ncand)];
+    } else if (c < 7) {
+        g->e[i].op = g->v[other].t == t ? 2 : 3;
+        g->e[i].var = other;
+    } else if (pq->tab && t == pq->ty[0]) {
+        g->e[i].op = 4;
+        g->e[i].var = pq->tab;
+        g->e[i].lit = 1 + below(g, 2);
+    } else {
+        g->e[i].fn = pq->cand[below(g, pq->ncand)];
+    }
+    return i;
+}
+
+/* a statement with procedural values: a variable given a value, or the
+   results of calls through values and of comparisons printed; 0 if no
+   group gives one */
+static uint32_t proc_show(G *g, uint32_t q, uint32_t *out);
+
+static uint32_t proc_stmt(G *g, uint32_t *out)
+{
+    if (!g->npr)
+        return 0;
+    uint32_t q = below(g, g->npr);
+    const xproc *pq = &g->pr[q];
+    uint32_t slot = pq->slot[below(g, pq->nslot)];
+    if (chance(g, 45)) {
+        uint32_t e = pval_expr(g, q, slot, false);
+        uint32_t s = new_s(g, S_ASSIGN);
+        g->st[s].var = slot;
+        g->st[s].e = e;
+        out[0] = s;
+        return 1;
+    }
+    return proc_show(g, q, out);
+}
+
+/* writeln(v = f, " ", v(...)): a comparison and a call through a value
+   of group q, printed */
+static uint32_t proc_show(G *g, uint32_t q, uint32_t *out)
+{
+    const xproc *pq = &g->pr[q];
+    uint32_t slot = pq->slot[below(g, pq->nslot)];
+    uint32_t items[5], k = 0;
+    uint32_t cmp = binop(g, chance(g, 50) ? O_EQ : O_NE, T_BOOL,
+                         var_ref(g, slot), pval_expr(g, q, slot, true));
+    items[k++] = cmp;
+    items[k++] = new_e(g, E_STR, 0);
+    uint32_t c = icall_expr(g, q, depth(g));
+    items[k++] = is_enum(g, g->e[c].t) ? 0 : c;
+    if (!items[k - 1]) {
+        uint32_t o = new_e(g, E_ORD, T_U32);
+        g->e[o].a = c;
+        items[k - 1] = o;
+    }
+    uint32_t w = new_s(g, S_WRITE);
+    g->st[w].args = keep_list(g, items, k);
+    g->st[w].nargs = k;
+    out[0] = w;
+    return 1;
+}
+
 static uint32_t expr(G *g, unsigned t, int d, bool need_var)
 {
     if (is_enum(g, t))
@@ -2598,6 +2828,12 @@ static uint32_t expr(G *g, unsigned t, int d, bool need_var)
     if (bv >= 0) /* a BigInt made into t: it must fit (§ 6.6) */
         return conv(g, t, var_ref(g, (uint32_t)bv));
     unsigned choice = below(g, 10);
+    if (choice == 9 && !sealed(g) && !in_function(g) && g->npr &&
+        chance(g, 60)) {
+        int q = pick_group(g, t);
+        if (q >= 0)
+            return icall_expr(g, (uint32_t)q, d);
+    }
     if (choice == 9) {
         int fn = pick_func(g, t);
         if (fn >= 0)
@@ -3412,6 +3648,11 @@ static uint32_t stmt(G *g, uint32_t *out)
         if (k)
             return k;
     }
+    if (!pure && !sealed(g) && g->npr && chance(g, 15)) {
+        uint32_t k = proc_stmt(g, out);
+        if (k)
+            return k;
+    }
     if (chance(g, 12)) {
         int fn = pick_agg_func(g, 0);
         int d = fn >= 0 ? pick_typed(g, g->r[fn].rt, true) : -1;
@@ -3979,6 +4220,52 @@ static void append(G *g, uint32_t *b, uint32_t *n, uint32_t s, bool front)
     free(x);
 }
 
+/* routines nested in routine id (§ 8.9): the first gives a value to 1
+   to 3 variables of its declarations, which have none, from what is
+   visible; sometimes a second changes one of them from them. Their
+   calls into first and second (0: none); the variables visible after */
+static void nested(G *g, uint32_t id, uint32_t *first, uint32_t *second)
+{
+    uint32_t nd = 1 + below(g, 3), dv[3], b[3];
+    for (uint32_t k = 0; k < nd; k++)
+        dv[k] = new_v(g, sealed(g) ? any_type(g) : var_type(g), V_LOCAL);
+    for (uint32_t k = 0; k < nd; k++) {
+        uint32_t e = value_for(g, g->v[dv[k]].t, depth(g));
+        uint32_t st = new_s(g, S_ASSIGN);
+        g->st[st].var = dv[k];
+        g->st[st].e = e;
+        b[k] = st;
+    }
+    xr *r = &g->r[id];
+    r->ndvar = (uint8_t)nd;
+    memcpy(r->dvar, dv, sizeof(dv));
+    uint32_t l = keep_list(g, b, nd);
+    r = &g->r[id];
+    r->nblk_[0] = l;
+    r->nn_[0] = nd;
+    r->nnest = 1;
+    for (uint32_t k = 0; k < nd; k++)
+        show(g, dv[k]);
+    *first = new_s(g, S_NCALL);
+    g->st[*first].fn = id;
+    *second = 0;
+    if (chance(g, 60)) {
+        uint32_t j = below(g, nd);
+        uint32_t e = value_for(g, g->v[dv[j]].t, depth(g));
+        uint32_t st = new_s(g, S_ASSIGN);
+        g->st[st].var = dv[j];
+        g->st[st].e = e;
+        l = keep_list(g, &st, 1);
+        r = &g->r[id];
+        r->nblk_[1] = l;
+        r->nn_[1] = 1;
+        r->nnest = 2;
+        *second = new_s(g, S_NCALL);
+        g->st[*second].fn = id;
+        g->st[*second].var = 1;
+    }
+}
+
 static void routine(G *g)
 {
     LIMBA_GROW(g->r, g->nr, g->capr);
@@ -4079,6 +4366,10 @@ static void routine(G *g)
         g->st[s].e = e;
         init[ninit++] = s;
     }
+    /* sometimes routines nested in it (§ 8.9) */
+    uint32_t ncall = 0, mcall = 0;
+    if (chance(g, 20))
+        nested(g, id, &ncall, &mcall);
     /* sometimes an array with computed bounds, alive at every return */
     uint32_t dyn = chance(g, 40) ? declare_dyn(g) : 0;
     for (uint32_t k = 0; k < g->r[id].np; k++)
@@ -4088,6 +4379,10 @@ static void routine(G *g)
     uint32_t b = block(g, 2 + (int)below(g, 5), &n);
     if (dyn)
         append(g, &b, &n, dyn, true);
+    if (ncall)
+        append(g, &b, &n, ncall, true);
+    if (mcall)
+        append(g, &b, &n, mcall, false);
     while (ninit)
         append(g, &b, &n, init[--ninit], true);
     /* an open parameter, so that its elements reach the output */
@@ -4396,7 +4691,7 @@ static void put_type(text *o, const G *g, uint32_t t)
     if (t < NTYPES)
         put(o, tname[t]);
     else
-        putf(o, "%c%u", "RRYOTPEDH"[g->ty[t].k], t);
+        putf(o, "%c%u", "RRYOTPEDHC"[g->ty[t].k], t);
 }
 
 static void put_value(text *o, unsigned t, v128 v)
@@ -4681,6 +4976,39 @@ static void pexpr(G *g, text *o, uint32_t i)
         put(o, "}");
         break;
     }
+    case E_ICALL:
+        /* the call is where its callee is: the name, or the [ */
+        if (!x->op)
+            here(x, o);
+        put_name(o, g, x->var);
+        if (x->op) {
+            here(x, o);
+            putf(o, "[%u]", (unsigned)x->lit);
+        }
+        pcall_args(g, o, 0, x->args, x->nargs, false, 0, x->pmap);
+        break;
+    case E_PVAL:
+        switch (x->op) {
+        case 0:
+            put_rname(o, g, x->fn);
+            break;
+        case 1:
+            put(o, "nil");
+            break;
+        case 2:
+            put_name(o, g, x->var);
+            break;
+        case 3:
+            put_type(o, g, x->t);
+            put(o, "(");
+            put_name(o, g, x->var);
+            put(o, ")");
+            break;
+        default:
+            put_name(o, g, x->var);
+            putf(o, "[%u]", (unsigned)x->lit);
+        }
+        break;
     case E_IN:
         put(o, "(");
         pexpr(g, o, x->a);
@@ -4884,6 +5212,9 @@ static void pstmt(G *g, text *o, uint32_t si, int ind)
         put_rname(o, g, s.fn);
         pcall_args(g, o, s.fn, s.args, s.nargs, s.named, s.npos, s.pmap);
         put(o, ";\n");
+        break;
+    case S_NCALL:
+        putf(o, "q%u();\n", 2 * s.fn + s.var);
         break;
     case S_EXIT:
     case S_CONT:
@@ -5158,7 +5489,24 @@ static void routine_text(G *g, text *o, uint32_t r, bool heading)
         put(o, ";\n");
         return;
     }
-    put(o, ";\nbegin\n");
+    put(o, ";\n");
+    if (x->ndvar) {
+        put(o, "var");
+        for (uint32_t k = 0; k < x->ndvar; k++) {
+            put(o, " ");
+            put_name(o, g, x->dvar[k]);
+            put(o, ": ");
+            put_type(o, g, g->v[x->dvar[k]].t);
+            put(o, ";");
+        }
+        put(o, "\n");
+    }
+    for (uint32_t k = 0; k < x->nnest; k++) {
+        putf(o, "  procedure q%u();\n  begin\n", 2 * r + k);
+        pblock(g, o, g->r[r].nblk_[k], g->r[r].nn_[k], 2);
+        putf(o, "  end q%u;\n", 2 * r + k);
+    }
+    put(o, "begin\n");
     pblock(g, o, x->blk, x->nblk, 1);
     put(o, "end ");
     put_own(o, g, r);
@@ -5506,6 +5854,16 @@ static void program(G *g, text *o, uint32_t nglob)
             } else if (x->k == K_PTR || x->k == K_HEAP) {
                 put(o, "^");
                 put_type(o, g, x->elem);
+            } else if (x->k == K_PROC) {
+                /* the profile of its function; the names documentation */
+                const xr *r = &g->r[x->index];
+                put(o, "function(");
+                for (uint32_t k = 0; k < r->np; k++) {
+                    putf(o, "%sx%u: ", k ? "; " : "", k);
+                    put_type(o, g, g->v[r->par[k]].t);
+                }
+                put(o, "): ");
+                put_type(o, g, r->rt);
             } else if (x->k == K_ENUM) {
                 put(o, "(");
                 for (uint32_t k = 0; k < x->elem; k++)
@@ -5532,6 +5890,34 @@ static void program(G *g, text *o, uint32_t nglob)
                 pexpr(g, o, g->st[v].e);
             }
             put(o, ";\n");
+        }
+    }
+    /* the variables of procedural types, ready (§ 11.5), and the tables,
+       typed constants (§ 4.3) */
+    for (uint32_t q = 0; q < g->npr; q++) {
+        const xproc *pq = &g->pr[q];
+        put(o, "\nvar\n");
+        for (uint32_t k = 0; k < pq->nslot; k++) {
+            put(o, "  ");
+            put_name(o, g, pq->slot[k]);
+            put(o, ": ");
+            put_type(o, g, g->v[pq->slot[k]].t);
+            if (pq->init[k]) {
+                put(o, " := ");
+                put_rname(o, g, pq->init[k] - 1);
+            }
+            put(o, ";\n");
+        }
+        if (pq->tab) {
+            put(o, "\nconst\n  ");
+            put_name(o, g, pq->tab);
+            put(o, ": array[Int32 range 1..2] of ");
+            put_type(o, g, pq->ty[0]);
+            put(o, " = {");
+            put_rname(o, g, pq->tabv[0]);
+            put(o, ", ");
+            put_rname(o, g, pq->tabv[1]);
+            put(o, "};\n");
         }
     }
     if (g->web)
@@ -5644,6 +6030,10 @@ static bool movable(const G *g, uint32_t r, const char *b, size_t n)
                 case 'z':
                 case 'j':
                     break; /* the tables of translate and readbytes */
+                case 'q':
+                    if (num / 2 != r)
+                        return false; /* a routine nested in another */
+                    break;
                 default:
                     return false;
                 }
@@ -6524,6 +6914,28 @@ static v128 ev(X *x, uint32_t i)
                 ncells(g, e->t) * sizeof(v128));
         return (v128)x->ref[e->var];
     }
+    case E_ICALL: {
+        /* the value first: nil stops before the arguments (§ 7.7) */
+        const xproc *q = &g->pr[e->fn];
+        v128 c = e->op ? (v128)q->tabv[(uint32_t)e->lit - 1] + 1
+                       : x->cell[x->ref[e->var]];
+        if (c == 0)
+            return fail(x, i, 102);
+        return call(x, (uint32_t)(c - 1), e->args, e->nargs, e->pmap, e->line,
+                    e->col);
+    }
+    case E_PVAL:
+        switch (e->op) {
+        case 0:
+            return (v128)e->fn + 1;
+        case 1:
+            return 0;
+        case 2:
+        case 3:
+            return x->cell[x->ref[e->var]];
+        default:
+            return (v128)tab_value(g, e->var, (uint32_t)e->lit) + 1;
+        }
     case E_MATH: {
         /* in double, rounded to the type: what Float32 does too; the
            functions of Limba's library, the bits every engine gives
@@ -6971,6 +7383,9 @@ static int run_stmt(X *x, uint32_t si)
     case S_CALL:
         call(x, s->fn, s->args, s->nargs, s->pmap, s->line, s->col);
         return x->trap ? X_RET : X_NEXT;
+    case S_NCALL: /* in the frame of its routine: its cells */
+        run_block(x, g->r[s->fn].nblk_[s->var], g->r[s->fn].nn_[s->var]);
+        return x->trap ? X_RET : X_NEXT;
     case S_EXIT:
     case S_CONT:
         if (s->e) {
@@ -7314,6 +7729,7 @@ static int run_block(X *x, uint32_t b, uint32_t n)
 
 static void g_free(G *g)
 {
+    free(g->pr);
     free(g->ty);
     free(g->e);
     free(g->st);
@@ -7462,8 +7878,10 @@ static bool attempt(uint64_t seed, limba_lxgen *p, bool units)
     for (uint32_t k = 0, n = below(&g, 3); k < n; k++)
         const_range(&g);
     g.budget = 30 + (int)below(&g, 60);
-    for (uint32_t k = 0, nr = below(&g, 5); k < nr && g.budget > 10; k++)
+    for (uint32_t k = 0, nr = below(&g, 5); k < nr && g.budget > 10; k++) {
         routine(&g);
+        proc_group(&g, g.nr - 1);
+    }
     shaped_all(&g);
     overload_twins(&g);
     /* main calls most functions whose result is a record or an array
@@ -7571,7 +7989,27 @@ static bool attempt(uint64_t seed, limba_lxgen *p, bool units)
         over_array(&g, s, v, i, b);
         first[nfirst++] = s;
     }
+    /* the procedural values first, before a trap: a comparison and a
+       call through each group, sometimes a variable changed */
+    uint32_t pfirst[6], npf = 0;
+    for (uint32_t q = 0; q < g.npr && q < 2; q++) {
+        uint32_t w[2];
+        if (chance(&g, 40))
+            continue;
+        proc_show(&g, q, w);
+        pfirst[npf++] = w[0];
+        if (chance(&g, 40)) {
+            uint32_t slot = g.pr[q].slot[below(&g, g.pr[q].nslot)];
+            uint32_t e = pval_expr(&g, q, slot, false);
+            uint32_t a = new_s(&g, S_ASSIGN);
+            g.st[a].var = slot;
+            g.st[a].e = e;
+            pfirst[npf++] = a;
+        }
+    }
     g.main_blk = block(&g, 4 + (int)below(&g, 12), &g.main_n);
+    while (npf)
+        append(&g, &g.main_blk, &g.main_n, pfirst[--npf], true);
     while (nfirst)
         append(&g, &g.main_blk, &g.main_n, first[--nfirst], true);
 
@@ -7719,6 +8157,10 @@ static bool attempt(uint64_t seed, limba_lxgen *p, bool units)
                     ncells(&g, t) * sizeof(v128));
         }
     }
+    /* the procedural variables: ready before the program (§ 11.5) */
+    for (uint32_t q = 0; q < g.npr; q++)
+        for (uint32_t k = 0; k < g.pr[q].nslot; k++)
+            x.cell[x.ref[g.pr[q].slot[k]]] = g.pr[q].init[k];
     text in = {NULL, 0, 0, 1, 1, 0};
     for (uint32_t k = 0; k < g.nline; k++) {
         putn(&in, g.str[g.line[k]].b, g.str[g.line[k]].n);

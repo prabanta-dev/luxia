@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `lx_gen` writes routines nested in routines (variables of the routine
+  without a value, assigned by the first nested routine) and procedural
+  types: variables and a typed constant table of them, calls through
+  them (nil stopping with 102), comparisons, conversions; its oracle
+  follows them.
 - § 11.5 and § 10.4 with procedural values: taking the value of a
   routine counts as a call of it there (where a typed constant is
   declared, for a constant); a call through a value of a type `T` is a
