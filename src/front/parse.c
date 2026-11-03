@@ -197,6 +197,8 @@ static void sync_decl(limba_lxp *P)
     }
 }
 
+static uint32_t params(limba_lxp *P);
+
 uint32_t limba_lxp_type(limba_lxp *P)
 {
     uint32_t start = P->pos;
@@ -276,6 +278,20 @@ uint32_t limba_lxp_type(limba_lxp *P)
     case LX_CARET:
         limba_lxp_next(P);
         return lxp_node(P, LXN_TPTR, loc, limba_lxp_type(P), 0, 0, 0);
+    case LX_KW_FUNCTION:
+    case LX_KW_PROCEDURE: {
+        /* a procedural type (§ 3.15): the semantic phase says where */
+        unsigned kind = lxp_kind(P);
+        limba_lxp_next(P);
+        uint32_t ps = params(P), result = 0;
+        if (kind == LX_KW_FUNCTION) {
+            limba_lxp_expect(P, LX_COLON, "and the type of the result");
+            result = limba_lxp_type(P);
+        }
+        uint32_t n = lxp_node(P, LXN_TPROC, loc, ps, result, 0, 0);
+        P->t->node[n].op = (uint8_t)kind;
+        return n;
+    }
     default:
         limba_lxp_expected(P, "a type");
         return lxp_node(P, LXN_ERROR, loc, 0, 0, 0, 0);

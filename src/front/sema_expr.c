@@ -164,7 +164,8 @@ bool lxs_assign_to(limba_lxs *S, uint32_t node, limba_ltype target,
     char ta[128], tb[128];
     if (t == S->ts.nil) {
         if (kind(S, target) == LIMBA_LTK_POINTER ||
-            kind(S, target) == LIMBA_LTK_OPAQUE) {
+            kind(S, target) == LIMBA_LTK_OPAQUE ||
+            kind(S, target) == LIMBA_LTK_PROC) {
             set(S, node, target);
             return true;
         }
@@ -211,14 +212,16 @@ static bool unify(limba_lxs *S, uint32_t node, uint32_t l, uint32_t r,
         *rt = lxs_base(S, *lt);
         return true;
     }
-    if (*lt == S->ts.nil && (kind(S, *rt) == LIMBA_LTK_POINTER ||
-                             kind(S, *rt) == LIMBA_LTK_OPAQUE)) {
+    if (*lt == S->ts.nil &&
+        (kind(S, *rt) == LIMBA_LTK_POINTER ||
+         kind(S, *rt) == LIMBA_LTK_OPAQUE || kind(S, *rt) == LIMBA_LTK_PROC)) {
         set(S, l, *rt);
         *lt = *rt;
         return true;
     }
-    if (*rt == S->ts.nil && (kind(S, *lt) == LIMBA_LTK_POINTER ||
-                             kind(S, *lt) == LIMBA_LTK_OPAQUE)) {
+    if (*rt == S->ts.nil &&
+        (kind(S, *lt) == LIMBA_LTK_POINTER ||
+         kind(S, *lt) == LIMBA_LTK_OPAQUE || kind(S, *lt) == LIMBA_LTK_PROC)) {
         set(S, r, *lt);
         *rt = *lt;
         return true;
@@ -410,7 +413,8 @@ static limba_ltype predefined(limba_lxs *S, unsigned op, limba_ltype lt,
     case LX_GT:
     case LX_GE:
         return composite(S, t) || k == LIMBA_LTK_POINTER ||
-                       k == LIMBA_LTK_OPAQUE || k == LIMBA_LTK_NIL
+                       k == LIMBA_LTK_OPAQUE || k == LIMBA_LTK_NIL ||
+                       k == LIMBA_LTK_PROC
                    ? 0
                    : t;
     }
@@ -447,6 +451,20 @@ static limba_ltype binary(limba_lxs *S, uint32_t node, uint32_t scope)
     limba_ltype lt, rt, res;
     bool la = lxs_node(S, l)->kind == LXN_AGG,
          ra = lxs_node(S, r)->kind == LXN_AGG;
+    if (comparison(op)) {
+        /* the name of a routine takes the procedural type of the other
+           operand, as an aggregate does; two names have no type (§ 6.2) */
+        bool ln = lxs_routine_name(S, scope, l) != 0;
+        bool rn = lxs_routine_name(S, scope, r) != 0;
+        if (ln && rn) {
+            lxs_error(S, LXE_ROUTINE_VALUE, node,
+                      "two routines compared have no type: give one of them "
+                      "a procedural type, in a variable or a constant");
+            return set(S, node, 0);
+        }
+        la = la || ln;
+        ra = ra || rn;
+    }
     if (comparison(op) && la != ra) {
         /* an aggregate takes the type of the other operand, on either
            side (§ 6.2); the order of evaluation stays left to right */
@@ -556,7 +574,8 @@ static limba_ltype binary(limba_lxs *S, uint32_t node, uint32_t scope)
                            k == LIMBA_LTK_ENUM || k == LIMBA_LTK_BOOL ||
                            k == LIMBA_LTK_STRING;
             bool equal = ordered || k == LIMBA_LTK_POINTER ||
-                         k == LIMBA_LTK_OPAQUE || k == LIMBA_LTK_NIL;
+                         k == LIMBA_LTK_OPAQUE || k == LIMBA_LTK_NIL ||
+                         k == LIMBA_LTK_PROC;
             if (!(op == LX_EQ || op == LX_NE ? equal : ordered))
                 return op_error(S, node, lt, "compares scalars and strings");
             res = S->ts.bool_;
@@ -644,7 +663,7 @@ static limba_ltype unary(limba_lxs *S, uint32_t node, uint32_t scope)
 
 /* the symbol a REF or TNAME names, without a word: 0 if none (Unit.Name
    too, § 11.3) */
-static limba_sym peek(limba_lxs *S, uint32_t scope, uint32_t node)
+limba_sym lxs_peek(limba_lxs *S, uint32_t scope, uint32_t node)
 {
     limba_lx_node *x = lxs_node(S, node);
     if (x->kind == LXN_REF && (x->flags & LXN_F_QUAL)) {
@@ -667,12 +686,41 @@ static limba_sym peek(limba_lxs *S, uint32_t scope, uint32_t node)
     return lxs_find(S, scope, x->a, 0);
 }
 
-static limba_ltype reference(limba_lxs *S, uint32_t node, uint32_t scope)
+static limba_ltype ref_sym(limba_lxs *S, uint32_t node, limba_sym s);
+
+static limba_ltype reference(limba_lxs *S, uint32_t node, uint32_t scope,
+                             limba_ltype expected)
 {
+    if (lxs_is_proc(S, expected) && S->nunits &&
+        !(lxs_node(S, node)->flags & LXN_F_QUAL)) {
+        /* in an interface, a routine of the implementation of its unit
+           as a value (§ 4.3): called outside through the constant */
+        bool impl;
+        uint32_t u = lxs_unit_of(S, scope, &impl);
+        limba_sym r = scope == S->units[u].intf && !lxs_peek(S, scope, node)
+                          ? limba_sym_local(&S->st, S->units[u].impl,
+                                            lxs_node(S, node)->a)
+                          : 0;
+        if (r && S->st.sym[r].kind == LIMBA_LSYM_ROUTINE) {
+            S->sym[node] = r;
+            lxs_force(S, r);
+            return lxs_proc_value(S, node, S->units[u].impl, r, expected);
+        }
+    }
     limba_sym s = lxs_lookup(S, scope, node);
     if (!s)
         return set(S, node, 0);
     lxs_force(S, s);
+    if (S->st.sym[s].kind == LIMBA_LSYM_ROUTINE ||
+        S->st.sym[s].kind == LIMBA_LSYM_BUILTIN)
+        /* the routine as a value (§ 3.15) */
+        return lxs_proc_value(S, node, scope, s, expected);
+    return ref_sym(S, node, s);
+}
+
+/* REF node naming s, looked up: a constant, a variable, a parameter */
+static limba_ltype ref_sym(limba_lxs *S, uint32_t node, limba_sym s)
+{
     limba_symbol *y = &S->st.sym[s];
     size_t n;
     const char *sp;
@@ -853,6 +901,19 @@ static limba_ltype conversion(limba_lxs *S, uint32_t node, uint32_t scope,
     /* Colour(n): a position from 0 to an enumeration, the inverse of ord
        (Ada's 'Val, § 6.6); from an integer of fixed size, checked */
     bool position = is_int(S, t) && kind(S, target) == LIMBA_LTK_ENUM;
+    if (lxs_is_proc(S, target) && (lxs_is_proc(S, t) || t == S->ts.nil)) {
+        /* between procedural types of one profile: the same routine, nil
+           stays nil (§ 6.6) */
+        char why[300];
+        if (t != S->ts.nil && !lxs_profile(S, t, target, why, sizeof(why))) {
+            lxs_error(S, LXE_PROFILE, node,
+                      "%s does not convert to %s, of another profile: %s",
+                      lxs_tname(S, t, ta), lxs_tname(S, target, tb), why);
+            return target;
+        }
+        S->val[node] = S->val[a];
+        return target;
+    }
     if (!numeric && !booleans && !position && !lxs_compatible(S, t, target)) {
         lxs_error(S, LXE_BAD_CONVERSION, node, "%s does not convert to %s",
                   lxs_tname(S, t, ta), lxs_tname(S, target, tb));
@@ -908,7 +969,7 @@ bool lxs_open_fits(limba_lxs *S, limba_ltype at, limba_ltype pt)
 static limba_ltype arg_expr(limba_lxs *S, uint32_t a, uint32_t scope,
                             limba_ltype expected)
 {
-    if (S->pre[a])
+    if (S->pre[a] == 1)
         return S->type[a];
     return lxs_expr(S, a, scope, expected);
 }
@@ -1315,7 +1376,7 @@ static limba_ltype builtin(limba_lxs *S, uint32_t node, uint32_t scope,
         /* low(T), high(T) of a discrete type: its first and last value,
            a constant of T (Ada's T'First, T'Last) */
         limba_lx_node *ax = lxs_node(S, a);
-        limba_sym ts = ax->kind == LXN_REF ? peek(S, scope, a) : 0;
+        limba_sym ts = ax->kind == LXN_REF ? lxs_peek(S, scope, a) : 0;
         if (ts && S->st.sym[ts].kind == LIMBA_LSYM_TYPE && id != LXB_LENGTH) {
             if (!lxs_lookup(S, scope, a))
                 return set(S, node, 0);
@@ -1675,14 +1736,60 @@ static limba_ltype builtin(limba_lxs *S, uint32_t node, uint32_t scope,
     return set(S, node, 0);
 }
 
+/* a call through a value of procedural type pt (§ 3.15, § 7.7): the
+   arguments by position only, one for each parameter (§ 8.7) */
+static limba_ltype value_call(limba_lxs *S, uint32_t node, uint32_t scope,
+                              limba_ltype pt)
+{
+    uint32_t args = lxs_node(S, node)->b, nargs = lxs_node(S, args)->b;
+    check_format(S, args);
+    const limba_typeinfo *ti = lxs_ty(S, pt);
+    uint32_t first = ti->first, count = ti->count;
+    limba_ltype result = ti->elem;
+    char tb[128];
+    if (nargs != count)
+        lxs_error(S, LXE_ARG_COUNT, node,
+                  "a value of %s takes %u argument%s, "
+                  "not %u",
+                  lxs_tname(S, pt, tb), count, count == 1 ? "" : "s", nargs);
+    uint32_t *given = limba_xcalloc(count + 1, sizeof(*given));
+    for (uint32_t i = 0; i < nargs; i++) {
+        uint32_t a = limba_lx_list_at(S->t, args, i);
+        if (lxs_node(S, a)->kind == LXN_NAMED) {
+            lxs_error(S, LXE_NAMED_PLACE, a,
+                      "a call through a value of a procedural type gives "
+                      "its arguments by position: the names of the "
+                      "parameters of %s are documentation",
+                      lxs_tname(S, pt, tb));
+            stray_arg(S, a, scope);
+        } else if (i < count) {
+            given[i] = a;
+            routine_arg(S, a, scope, S->ts.param[first + i]);
+        } else {
+            stray_arg(S, a, scope);
+        }
+    }
+    lxs_alias_via(S, pt, given);
+    free(given);
+    return set(S, node, result);
+}
+
 static limba_ltype call(limba_lxs *S, uint32_t node, uint32_t scope,
                         limba_ltype expected)
 {
     limba_lx_node *x = lxs_node(S, node);
     uint32_t callee = x->a;
     if (lxs_node(S, callee)->kind != LXN_REF) {
-        lxs_expr(S, callee, scope, 0);
-        lxs_error(S, LXE_NOT_CALLABLE, node, "only routines are called");
+        limba_ltype ct = lxs_expr(S, callee, scope, 0);
+        if (lxs_is_proc(S, ct))
+            return value_call(S, node, scope, ct);
+        if (ct)
+            lxs_error(S, LXE_NOT_CALLABLE, node,
+                      "only routines and values of a procedural type are "
+                      "called");
+        uint32_t args = x->b;
+        for (uint32_t i = 0; i < lxs_node(S, args)->b; i++)
+            stray_arg(S, limba_lx_list_at(S->t, args, i), scope);
         return set(S, node, 0);
     }
     limba_sym s = lxs_lookup(S, scope, callee);
@@ -1710,6 +1817,16 @@ static limba_ltype call(limba_lxs *S, uint32_t node, uint32_t scope,
     }
     case LIMBA_LSYM_BUILTIN:
         return builtin(S, node, scope, s, expected);
+    case LIMBA_LSYM_VAR:
+    case LIMBA_LSYM_PARAM:
+    case LIMBA_LSYM_CONST:
+        if (lxs_is_proc(S, S->st.sym[s].type)) {
+            /* a variable, a parameter or a constant of a procedural type:
+               a call through its value */
+            ref_sym(S, callee, s);
+            return value_call(S, node, scope, S->st.sym[s].type);
+        }
+        break;
     }
     size_t n;
     const char *sp = lxs_spell(S, s, &n);
@@ -1730,7 +1847,7 @@ static limba_ltype membership(limba_lxs *S, uint32_t node, uint32_t scope)
     /* x in T: the range of a type */
     limba_lx_node *lx_ = lxs_node(S, lo);
     if (!hi && lx_->kind == LXN_REF) {
-        limba_sym s = peek(S, scope, lo);
+        limba_sym s = lxs_peek(S, scope, lo);
         if (s && S->st.sym[s].kind == LIMBA_LSYM_TYPE) {
             lxs_lookup(S, scope, lo); /* the spelling */
             lxs_force(S, s);
@@ -2251,7 +2368,7 @@ limba_ltype lxs_expr(limba_lxs *S, uint32_t node, uint32_t scope,
         S->val[node] = lxs_value_new(S, LXV_NIL);
         return set(S, node, S->ts.nil);
     case LXN_REF:
-        return reference(S, node, scope);
+        return reference(S, node, scope, expected);
     case LXN_UNARY:
         return unary(S, node, scope);
     case LXN_BINARY:
@@ -2298,7 +2415,7 @@ limba_ltype lxs_expr(limba_lxs *S, uint32_t node, uint32_t scope,
         /* new(A range lo..hi), A an open array: range gives the bounds
            of the index, not a constraint on a value (§ 9.7) */
         limba_lx_node *tn = lxs_node(S, x->a);
-        limba_sym ts = tn->kind == LXN_TNAME ? peek(S, scope, x->a) : 0;
+        limba_sym ts = tn->kind == LXN_TNAME ? lxs_peek(S, scope, x->a) : 0;
         limba_ltype ot = ts && S->st.sym[ts].kind == LIMBA_LSYM_TYPE
                              ? (lxs_force(S, ts), S->st.sym[ts].type)
                              : 0;

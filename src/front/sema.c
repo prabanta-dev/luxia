@@ -556,7 +556,22 @@ void lxs_declare_all(limba_lxs *S, uint32_t list, uint32_t scope, bool top)
     }
 }
 
+static void resolve_const_in(limba_lxs *S, limba_sym s);
+
+/* a constant is one for the whole program (§ 4.3): what it names is
+   reached by the initialisation of its file */
 static void resolve_const(limba_lxs *S, limba_sym s)
+{
+    uint32_t who = S->who;
+    if (S->nunits) {
+        bool impl;
+        S->who = LXS_INIT | lxs_unit_of(S, S->st.sym[s].scope, &impl);
+    }
+    resolve_const_in(S, s);
+    S->who = who;
+}
+
+static void resolve_const_in(limba_lxs *S, limba_sym s)
 {
     limba_symbol *y = &S->st.sym[s];
     uint32_t scope = y->scope, d = y->node;
@@ -678,7 +693,14 @@ static void check_default(limba_lxs *S, uint32_t p, unsigned mode,
         return;
     }
     uint32_t errors = S->rep->errors;
+    /* a routine named here is reached as a constant's is (§ 4.3) */
+    uint32_t who = S->who;
+    if (S->nunits) {
+        bool impl;
+        S->who = LXS_INIT | lxs_unit_of(S, scope, &impl);
+    }
     limba_ltype vt = lxs_expr(S, v, scope, pt);
+    S->who = who;
     limba_lx_node *x = lxs_node(S, v);
     bool known = S->val[v] != 0 ||
                  (x->kind == LXN_AGG && (x->flags & LXN_F_CONST)) ||
@@ -759,6 +781,13 @@ static void resolve_routine(limba_lxs *S, limba_sym s)
 
 /* two types written in a heading and in its body: the same type, or
    ranges of the same base with the same bounds (§ 11.2) */
+static bool same_type(limba_lxs *S, limba_ltype a, limba_ltype b);
+
+bool lxs_same_type(limba_lxs *S, limba_ltype a, limba_ltype b)
+{
+    return same_type(S, a, b);
+}
+
 static bool same_type(limba_lxs *S, limba_ltype a, limba_ltype b)
 {
     if (a == b || !a || !b)
@@ -1073,7 +1102,8 @@ static limba_ltype type_node(limba_lxs *S, uint32_t node, uint32_t scope,
         if (!b)
             return 0;
         unsigned k = lxs_ty(S, b)->kind;
-        if (k == LIMBA_LTK_OPEN || k == LIMBA_LTK_ROUTINE) {
+        if (k == LIMBA_LTK_OPEN || k == LIMBA_LTK_ROUTINE ||
+            k == LIMBA_LTK_PROC) {
             lxs_error(S, LXE_TYPE_MISMATCH, node,
                       "new makes a type from a named or scalar type");
             return 0;
@@ -1229,6 +1259,38 @@ static limba_ltype type_node(limba_lxs *S, uint32_t node, uint32_t scope,
             lxs_error(S, LXE_CONST_RANGE, node,
                       "the record is larger than the memory can address");
         return r;
+    }
+    case LXN_TPROC: {
+        /* a procedural type (§ 3.15): with a name only, in a type
+           section; no default values */
+        if (!self || where != LXT_DECL)
+            lxs_error(S, LXE_PROC_TYPE_FORM, node,
+                      "a procedural type is declared with a name, in a type "
+                      "section: type Compare = function(a, b: Int32): "
+                      "Boolean;");
+        limba_param *ps = NULL;
+        uint32_t np = 0, cap = 0, plist = x->a;
+        for (uint32_t i = 0; i < lxs_node(S, plist)->b; i++) {
+            uint32_t p = limba_lx_list_at(S->t, plist, i);
+            limba_lx_node *px = lxs_node(S, p);
+            unsigned mode = px->op == LX_KW_VAR   ? LXS_VAR
+                            : px->op == LX_KW_OUT ? LXS_OUT
+                                                  : LXS_IN;
+            if (px->c)
+                lxs_error(S, LXE_PROC_TYPE_FORM, px->c,
+                          "a procedural type has no default values: a call "
+                          "through a value gives every argument");
+            limba_ltype pt = lxs_type(S, px->b, scope, LXT_PARAM);
+            for (uint32_t k = 0; k < lxs_node(S, lxs_node(S, p)->a)->b; k++) {
+                LIMBA_GROW(ps, np, cap);
+                ps[np++] = (limba_param){pt, (uint8_t)mode};
+            }
+        }
+        x = lxs_node(S, node);
+        limba_ltype result = x->b ? lxs_type(S, x->b, scope, 0) : S->ts.void_;
+        limba_ltype t = limba_types_proc(&S->ts, ps, np, result);
+        free(ps);
+        return t;
     }
     case LXN_TPTR: {
         limba_ltype p = limba_types_pointer(&S->ts, 0);
@@ -1430,6 +1492,8 @@ static const char *c_why(limba_lxs *S, limba_ltype t)
                "as a var parameter";
     case LIMBA_LTK_INT:
         return ": a range is not C's; convert the value afterwards";
+    case LIMBA_LTK_PROC:
+        return ": routines go to C as values later (callbacks)";
     }
     return "";
 }

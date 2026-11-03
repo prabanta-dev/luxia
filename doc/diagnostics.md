@@ -534,9 +534,9 @@ prog.luxia:3:8: error[L0025]: 'n' is not a type
 
 ### L0026 — NOT A VALUE
 
-A type or a routine used where a value is wanted. For a type the message
-suggests a conversion (§ 6.6); for a routine it is "'…' is a routine:
-call it with …(...)" (calls always have parentheses, § 7.7).
+A type used where a value is wanted: the message suggests a conversion
+(§ 6.6). The name of a routine where no procedural type is expected is
+L0103.
 
 ```pascal
 program p;
@@ -1900,6 +1900,14 @@ end.
 prog.luxia:3:11: error[L0090]: an argument by name (name => value) goes only to a routine of the program, not to one of the language nor to a conversion
 ```
 
+Nor do they go through a value of a procedural type, whose parameter
+names are documentation (§ 3.15, § 8.7): `c(b => 1, a => 2)` with `c` a
+`Compare` gives, for each argument,
+
+```
+prog.luxia:9:13: error[L0090]: a call through a value of a procedural type gives its arguments by position: the names of the parameters of Compare are documentation
+```
+
 ### L0091 — DEFAULT VALUE OUT OF PLACE
 
 A default value goes only on a parameter without a mode, not on an open array, and the parameters with one come last (§ 8.6).
@@ -2179,6 +2187,117 @@ end.
 prog.luxia:10:7: error[L0102]: 'rows' is given to 'Fix', which can also change it as a variable of 'Outer': pass a copy
 ```
 
+## Procedural types
+
+### L0103 — ROUTINE AS A VALUE
+
+The name of a routine without parentheses is a value only where a
+procedural type is expected (§ 3.15): on the right of an assignment, as
+the initial value of a variable whose type is written, as an argument,
+after `return`, in an aggregate, and beside a value of a procedural type
+in `=` and `<>`. Elsewhere it has no type to take:
+
+```pascal
+program p;
+function Less(a, b: Int32): Boolean;
+begin
+  return a < b;
+end;
+var c := Less;
+begin
+end.
+```
+
+```
+prog.luxia:6:10: error[L0103]: 'Less' is a routine: call it with Less(...); as a value it goes only where a procedural type is expected
+```
+
+Two names of routines compared have no type either (`Less = More`, § 6.2):
+
+```
+prog.luxia:11:16: error[L0103]: two routines compared have no type: give one of them a procedural type, in a variable or a constant
+```
+
+### L0104 — ROUTINE THAT IS NOT A VALUE
+
+A routine nested in another, an external routine and a routine of the
+language are not values of a procedural type (§ 3.15); what counts is the
+routine chosen, so a `str` added for a type is one.
+
+```pascal
+program p;
+type Action = procedure(n: Int32);
+procedure Outer();
+  procedure Show(n: Int32);
+  begin
+    writeln(n);
+  end;
+var a: Action := Show;
+begin
+  a(1);
+end;
+begin
+  Outer();
+end.
+```
+
+```
+prog.luxia:8:18: error[L0104]: 'Show': a routine nested in another is not a value: its environment would have to go with it
+```
+
+```
+prog.luxia:3:18: error[L0104]: 'writeln' is a routine of the language: it is not a value
+```
+
+### L0105 — PROFILE
+
+A routine goes to a procedural type when both have the same parameters,
+with the same modes and the same types (ranges included), and the same
+result (§ 3.15). The message says the first difference. A conversion
+between two procedural types of different profiles gives the same code.
+
+```pascal
+program p;
+type Compare = function(a, b: Int32): Boolean;
+function Less(a, b: Int64): Boolean;
+begin
+  return a < b;
+end;
+var c: Compare := Less;
+begin
+end.
+```
+
+```
+prog.luxia:7:19: error[L0105]: 'Less' is not of the profile of Compare: its parameter 1 is Int64, the type's Int32
+```
+
+```
+prog.luxia:8:8: error[L0105]: Compare does not convert to Order, of another profile: its parameter 1 is Int32, the type's Int64
+```
+
+### L0106 — FORM OF A PROCEDURAL TYPE
+
+A procedural type is declared with a name, in a `type` section, and its
+parameters have no default values (§ 3.15).
+
+```pascal
+program p;
+procedure Apply(f: procedure(n: Int32));
+begin
+end;
+begin
+end.
+```
+
+```
+prog.luxia:2:20: error[L0106]: a procedural type is declared with a name, in a type section: type Compare = function(a, b: Int32): Boolean;
+```
+
+```
+prog.luxia:2:37: error[L0106]: a procedural type has no default values: a call through a value gives every argument
+```
+
 ## All the codes
 
 | Code | Name | Meaning |
@@ -2208,7 +2327,7 @@ prog.luxia:10:7: error[L0102]: 'rows' is given to 'Fix', which can also change i
 | L0023 | DUPLICATE | a name declared twice in a scope, or a name of the language |
 | L0024 | BEFORE_DECL | a constant or variable used before its declaration |
 | L0025 | NOT_A_TYPE | a value where a type is wanted |
-| L0026 | NOT_A_VALUE | a type or routine where a value is wanted |
+| L0026 | NOT_A_VALUE | a type where a value is wanted |
 | L0027 | TYPE_MISMATCH | a value of another type |
 | L0028 | OPERATOR_TYPE | an operator on a type it does not take |
 | L0029 | CONST_RANGE | a constant out of the range of its type |
@@ -2218,7 +2337,7 @@ prog.luxia:10:7: error[L0102]: 'rows' is given to 'Fix', which can also change i
 | L0033 | NEED_TYPE | a constant without a type gives no type |
 | L0034 | NOT_ASSIGNABLE | not a variable, or one that cannot change |
 | L0035 | ARG_COUNT | too many or too few arguments |
-| L0036 | NOT_CALLABLE | a call of something that is not a routine |
+| L0036 | NOT_CALLABLE | a call of something that is neither a routine nor a procedural value |
 | L0037 | RESULT_IGNORED | a function called as a statement |
 | L0038 | NO_RESULT | a procedure used as a value |
 | L0039 | BAD_CONVERSION | `T(x)` between types that do not convert |
@@ -2272,7 +2391,7 @@ prog.luxia:10:7: error[L0102]: 'rows' is given to 'Fix', which can also change i
 | L0087 | ARG_NAME | `name => value` with no such parameter, or no plain name |
 | L0088 | ARG_TWICE | a parameter given twice |
 | L0089 | ARG_MISSING | a parameter without a default value given no argument |
-| L0090 | NAMED_PLACE | an argument by name to a routine of the language or a conversion |
+| L0090 | NAMED_PLACE | an argument by name to a routine of the language, a conversion or a call through a value |
 | L0091 | DEFAULT_PLACE | a default value on a `var`, `out` or open array parameter, or not last |
 | L0092 | MULTI_INDEX | an array of more indices indexed in part, or `a[i][j]`; `a[i, j]` of an array of arrays; indices open and not open mixed; `low(a, k)` past its indices |
 | L0093 | OVERLOAD_MISSING | a routine without `overload` with the name of another one of its file |
@@ -2285,3 +2404,7 @@ prog.luxia:10:7: error[L0102]: 'rows' is given to 'Fix', which can also change i
 | L0100 | STR_FORM | a `str` added in a form it does not take |
 | L0101 | LONE_OVERLOAD | warning: `overload` on a routine that joins no other |
 | L0102 | ALIASED | one object given to a routine by two ways, one of which can change it |
+| L0103 | ROUTINE_VALUE | the name of a routine where no procedural type is expected |
+| L0104 | NOT_A_VALUE_ROUTINE | a nested, external or predefined routine as a value |
+| L0105 | PROFILE | a routine or a value of another profile than the procedural type |
+| L0106 | PROC_TYPE_FORM | a procedural type without a name, or with a default value |

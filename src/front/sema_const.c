@@ -74,6 +74,8 @@ int lxs_value_cmp(const limba_lxs *S, uint32_t a, uint32_t b)
         int c = memcmp(s, t, n < m ? n : m);
         return c ? (c < 0 ? -1 : 1) : n < m ? -1 : n > m ? 1 : 0;
     }
+    if (x->kind == LXV_FUNC && y->kind == LXV_FUNC)
+        return x->str != y->str; /* the same routine, or another */
     if (x->kind != LXV_NUM || y->kind != LXV_NUM)
         return x->kind == y->kind ? 0 : 1;
     return limba_rat_cmp(&x->num, &y->num);

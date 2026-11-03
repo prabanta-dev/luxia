@@ -48,6 +48,7 @@ bool lxl_scalar(const lxl *L, limba_ltype t)
     case LIMBA_LTK_POINTER:
     case LIMBA_LTK_OPAQUE:
     case LIMBA_LTK_NIL:
+    case LIMBA_LTK_PROC:
         return true;
     }
     return false;
@@ -110,6 +111,7 @@ limba_id lxl_type(lxl *L, limba_ltype t)
     case LIMBA_LTK_OPAQUE:
     case LIMBA_LTK_NIL:
     case LIMBA_LTK_OPEN:
+    case LIMBA_LTK_PROC:
         r = LIMBA_T_PTR;
         break;
     case LIMBA_LTK_ARRAY: {
@@ -1100,14 +1102,14 @@ static void undefined(void *ctx, uint32_t tag)
               "'%.*s' may be read before it is given a value", (int)n, sp);
 }
 
-static limba_id func_type(lxl *L, limba_sym s)
+limba_id lxl_func_type(lxl *L, limba_ltype t, bool env)
 {
-    const limba_typeinfo *sig = ti(L, L->S->st.sym[s].type);
+    const limba_typeinfo *sig = ti(L, t);
     limba_id *ps =
         limba_xmalloc(((1 + 2 * LXL_MAXDIMS) * sig->count + 3) * sizeof(*ps));
     uint32_t n = 0;
     bool agg = sig->elem != L->S->ts.void_ && !lxl_scalar(L, sig->elem);
-    if (lxl_has_env(L, s))
+    if (env)
         ps[n++] = LIMBA_T_PTR; /* the environment (§ 8.9) */
     if (agg)
         ps[n++] = LIMBA_T_PTR; /* where the result goes */
@@ -1130,6 +1132,11 @@ static limba_id func_type(lxl *L, limba_sym s)
     limba_id ft = limba_type_func(L->m, ret, ps, n, false);
     free(ps);
     return ft;
+}
+
+static limba_id func_type(lxl *L, limba_sym s)
+{
+    return lxl_func_type(L, L->S->st.sym[s].type, lxl_has_env(L, s));
 }
 
 /* how C takes a narrow integer of type t: sext for a signed one, zext

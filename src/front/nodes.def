@@ -39,6 +39,8 @@ LX_NODE(TOPEN, "topen", "nn--")      /* array[I range <>] of T: box, T */
 LX_NODE(TRECORD, "trecord", "l---")  /* FIELD nodes */
 LX_NODE(FIELD, "field", "ln--")      /* names, type */
 LX_NODE(TPTR, "tptr", "n---")
+LX_NODE(TPROC, "tproc", "lq--")     /* op: procedure or function; the
+                                       parameters, the result (0: none) */
 /* statements */
 LX_NODE(ASSIGN, "assign", "nn--")
 LX_NODE(CALLST, "callst", "n---")    /* a CALL used as a statement */

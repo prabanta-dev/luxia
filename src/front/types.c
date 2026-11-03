@@ -184,6 +184,14 @@ limba_ltype limba_types_routine(limba_types *ts, const limba_param *params,
     return id;
 }
 
+limba_ltype limba_types_proc(limba_types *ts, const limba_param *params,
+                             uint32_t n, limba_ltype result)
+{
+    limba_ltype id = limba_types_routine(ts, params, n, result);
+    ts->t[id].kind = LIMBA_LTK_PROC;
+    return id;
+}
+
 limba_ltype limba_types_record_begin(limba_types *ts)
 {
     limba_ltype id = add(ts, LIMBA_LTK_RECORD, LIMBA_TF_INCOMPLETE, 0, 1);
@@ -338,6 +346,8 @@ static size_t show(const limba_types *ts, limba_ltype id, limba_name_fn name,
         return put(buf, size, len, "an enumeration", 14);
     case LIMBA_LTK_ROUTINE:
         return put(buf, size, len, "a routine", 9);
+    case LIMBA_LTK_PROC:
+        return put(buf, size, len, "a procedural type", 17);
     case LIMBA_LTK_BIGINT:
         return put(buf, size, len, "an integer of any size", 22);
     case LIMBA_LTK_OPAQUE:

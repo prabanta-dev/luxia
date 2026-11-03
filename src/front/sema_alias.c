@@ -166,3 +166,38 @@ void lxs_alias_call(limba_lxs *S, limba_sym s, const uint32_t *given,
     free(st);
     free(ns);
 }
+
+void lxs_alias_via(limba_lxs *S, limba_ltype via, const uint32_t *given)
+{
+    const limba_typeinfo *ti = lxs_ty(S, via);
+    uint32_t first = ti->first, count = ti->count;
+    if (!count)
+        return;
+    uint32_t(*st)[MAX_STEPS] = limba_xcalloc(count, sizeof(*st));
+    uint32_t *ns = limba_xcalloc(count, sizeof(*ns));
+    char tb[128];
+    for (uint32_t j = 0; j < count; j++) {
+        limba_param p = S->ts.param[first + j];
+        if (!given[j] || !by_address(S, p))
+            continue;
+        ns[j] = steps_of(S, given[j], st[j]);
+        if (!ns[j])
+            continue;
+        for (uint32_t i = 0; i < j; i++) {
+            limba_param q = S->ts.param[first + i];
+            if (!ns[i] || (p.mode == LXS_IN && q.mode == LXS_IN) ||
+                !overlap(S, st[i], ns[i], st[j], ns[j]))
+                continue;
+            size_t vn;
+            const char *vp = lxs_spell(S, S->sym[st[j][0]], &vn);
+            lxs_error(S, LXE_ALIASED, given[j],
+                      "'%.*s' is given twice to a value of %s, which can "
+                      "change it through parameter %u: pass a copy",
+                      (int)vn, vp, lxs_tname(S, via, tb),
+                      (p.mode != LXS_IN ? j : i) + 1);
+            break;
+        }
+    }
+    free(st);
+    free(ns);
+}

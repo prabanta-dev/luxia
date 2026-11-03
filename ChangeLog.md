@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Procedural types (§ 3.15): `type Compare = function(a, b: Int32):
+  Boolean;`, declared with a name only (L0106), types by name with a
+  conversion between those of one profile (modes, types with their
+  ranges, result; L0105). The name of a routine is a value where a
+  procedural type is expected (L0103 elsewhere), the routine of the name
+  with the profile of the type; nested, external and predefined routines
+  are not values (L0104), a `str` added for a type is. A call through a
+  value (`cmp(1, 2)`, `ops[i](n)`, `Pick()(1, 2)`) gives its arguments by
+  position and stops on `nil` (trap 102) before them; `=` and `<>`
+  compare routines. Routine values are constants: typed constants,
+  default values, data of globals (relocations to functions); a constant
+  of an interface may name a routine of the implementation. A routine
+  given as a value is reached. `tests/run/procedures`.
 - Nested routines (§ 8.9): a routine of a file declares routines among
   its declarations, one level deep, which see its parameters, constants,
   types and the variables declared before them, and call each other in

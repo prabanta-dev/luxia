@@ -40,6 +40,8 @@ enum {
     LIMBA_LTK_BIGINT, /* an integer of any size: a counted handle, not
                          discrete */
     LIMBA_LTK_OPAQUE, /* an address of memory of C, never dereferenced */
+    LIMBA_LTK_PROC,   /* a procedural type: the address of a routine, or
+                         nil; distinct by declaration */
 };
 
 #define LIMBA_TF_SIGNED 1u
@@ -59,13 +61,13 @@ typedef struct {
     uint16_t bits;         /* INT, FLOAT: the width */
     limba_ltype root;      /* equal roots: compatible */
     limba_ltype base;      /* what a range narrows; itself otherwise */
-    limba_ltype elem;      /* ARRAY, OPEN: elements; POINTER: target; ROUTINE:
-                             result (VOID for a procedure) */
+    limba_ltype elem;      /* ARRAY, OPEN: elements; POINTER: target; ROUTINE,
+                             PROC: result (VOID for a procedure) */
     limba_ltype index;     /* ARRAY: the index type */
     __int128 lo, hi;       /* discrete types: the bounds */
     uint32_t name;         /* a name id for messages, UINT32_MAX if none */
-    uint32_t first, count; /* RECORD: fields; ROUTINE: parameters; ENUM:
-                              count only */
+    uint32_t first, count; /* RECORD: fields; ROUTINE, PROC: parameters;
+                              ENUM: count only */
     uint64_t size;         /* bytes; 0 when not known before run time */
     uint32_t align;
 } limba_typeinfo;
@@ -125,6 +127,9 @@ limba_ltype limba_types_pointer(limba_types *ts, limba_ltype target);
 void limba_types_set_target(limba_types *ts, limba_ltype p, limba_ltype target);
 limba_ltype limba_types_routine(limba_types *ts, const limba_param *params,
                                 uint32_t n, limba_ltype result);
+/* a procedural type of that profile, a type of its own */
+limba_ltype limba_types_proc(limba_types *ts, const limba_param *params,
+                             uint32_t n, limba_ltype result);
 /* a record: begin, add the fields in order, end lays it out */
 limba_ltype limba_types_record_begin(limba_types *ts);
 void limba_types_record_field(limba_types *ts, limba_ltype r, uint32_t name,

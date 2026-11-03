@@ -110,10 +110,11 @@ enum {
 
 /* a constant: every number and discrete value is a rational (integers,
    characters, booleans and enumeration values have denominator 1) */
-enum { LXV_NUM = 1, LXV_STR, LXV_NIL };
+enum { LXV_NUM = 1, LXV_STR, LXV_NIL, LXV_FUNC };
 typedef struct {
     uint8_t kind;
-    uint32_t str; /* LXV_STR: the id in the string table */
+    uint32_t str; /* LXV_STR: the id in the string table; LXV_FUNC: the
+                     routine, a value of a procedural type (§ 3.15) */
     limba_rat num;
 } limba_lxs_value;
 
@@ -142,6 +143,7 @@ typedef struct {
     limba_sym what; /* a routine, or a variable of a unit or program */
     uint32_t node;  /* where */
     bool write;
+    bool taken; /* a routine given as a value (§ 3.15): reached, not called */
 } limba_lxs_use;
 
 /* a variable of a file given by address to a routine (§ 8.1): an error
@@ -257,7 +259,9 @@ typedef struct {
     uint32_t novl;
     uint32_t *ovl_pend;
     uint32_t npend, cappend;
-    uint8_t *pre;
+    uint8_t *pre;       /* 1: typed; 2: the name of a routine, waiting for the
+                           type of its parameter (§ 8.8) */
+    uint32_t arg_scope; /* the scope of the call being chosen */
     /* the operators of the program (§ 6.9): their symbols, the token
        kind of each; the bodies to bind, (ROUTINE node, scope) pairs */
     limba_sym *ops;
@@ -293,9 +297,11 @@ void limba_lxs_check(limba_lxs *S);
 /* the arguments of a call of routine s (given[j] the node of parameter
    j, 0 for a default value; pname[j] its name node): one object given
    by two ways, one of which can change it (§ 8.1); a variable of a file
-   given by address is kept for lxs_unit_warnings */
+   given by address is kept for lxs_unit_warnings. s 0: a call through
+   a value of procedural type via, by its parameters only */
 void lxs_alias_call(limba_lxs *S, limba_sym s, const uint32_t *given,
                     const uint32_t *pname, uint32_t first, uint32_t count);
+void lxs_alias_via(limba_lxs *S, limba_ltype via, const uint32_t *given);
 
 /* a file of the program, for the driver before limba_lxs_check: its
    index (the first one added is units[0]) */
@@ -328,6 +334,9 @@ bool lxs_unit_declare(limba_lxs *S, uint32_t scope, uint32_t name_node);
 /* record what is being checked uses: a routine called, a variable of a
    file read or written */
 void lxs_use(limba_lxs *S, limba_sym what, uint32_t node, bool write);
+/* routine what given as a value at node (§ 3.15, § 11.5): reached with
+   who, not called by it */
+void lxs_use_taken(limba_lxs *S, limba_sym what, uint32_t node);
 /* the units: their scopes, names and declarations, bodies and
    initialisations; then the order of the initialisations */
 void lxs_check_units(limba_lxs *S);
@@ -377,6 +386,10 @@ void lxs_ovl_bind(limba_lxs *S);
 /* once every routine is resolved: two of one name that the same
    arguments by position reach (§ 8.8) */
 void lxs_ovl_check(limba_lxs *S);
+/* the routines the name s at callee (a REF) means in scope, the
+   homographs hidden; 0 for s alone (*out NULL), else *out malloc'd */
+uint32_t lxs_ovl_meanings(limba_lxs *S, uint32_t callee, uint32_t scope,
+                          limba_sym s, limba_sym **out);
 /* the routine of the name of s that the call node takes: s itself when
    the name has one meaning; 0 when none or more than one (reported). The
    arguments it checked are marked in pre */
@@ -457,6 +470,8 @@ void lxs_nested_bodies(limba_lxs *S, limba_sym r, uint32_t list,
 
 /* declarations and types (sema.c) */
 limba_sym lxs_lookup(limba_lxs *S, uint32_t scope, uint32_t node);
+/* the symbol a REF or TNAME names, reporting nothing: 0 if none */
+limba_sym lxs_peek(limba_lxs *S, uint32_t scope, uint32_t node);
 void lxs_force(limba_lxs *S, limba_sym s);
 /* where a type is written: a variable may have computed bounds, a
    parameter may be an open array, and a type declaration may name one */
@@ -476,6 +491,27 @@ limba_sym lxs_declare(limba_lxs *S, uint32_t scope, uint32_t name_node,
 /* the base of a range, and the type operations work in */
 limba_ltype lxs_base(const limba_lxs *S, limba_ltype t);
 bool lxs_compatible(const limba_lxs *S, limba_ltype a, limba_ltype b);
+/* two types written in two places mean the same: the same type, or
+   ranges of one base with the same bounds (§ 11.2, the profile § 3.15) */
+bool lxs_same_type(limba_lxs *S, limba_ltype a, limba_ltype b);
+
+/* procedural types (sema_proc.c, § 3.15) */
+bool lxs_is_proc(const limba_lxs *S, limba_ltype t);
+/* does routine signature sig have the profile of procedural type pt;
+   if not, why (when why is not NULL) */
+bool lxs_profile(limba_lxs *S, limba_ltype sig, limba_ltype pt, char *why,
+                 size_t cap);
+/* the name of routine (or routine of the language) s at REF node, as a
+   value where expected is wanted: the routine of its profile, reported
+   when there is none, it is no value, or no procedural type is expected */
+limba_ltype lxs_proc_value(limba_lxs *S, uint32_t node, uint32_t scope,
+                           limba_sym s, limba_ltype expected);
+/* is node the name of a routine (or of a routine of the language), a REF
+   that may become a value: its symbol, 0 if not */
+limba_sym lxs_routine_name(limba_lxs *S, uint32_t scope, uint32_t node);
+/* can the routine name node go to a parameter of procedural type pt:
+   one routine of the name has its profile (§ 8.8) */
+bool lxs_proc_fits(limba_lxs *S, uint32_t node, limba_ltype pt);
 
 /* constants (sema_const.c) */
 uint32_t lxs_value_new(limba_lxs *S, uint8_t kind);

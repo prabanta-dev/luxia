@@ -268,18 +268,31 @@ static void more_bounds(lxl *L, uint32_t node, uint32_t a, limba_ltype pt,
     }
 }
 
-static void routine(lxl *L, uint32_t node, limba_sym s, limba_id *result)
+/* a call of routine s, or (s 0) through the value of the callee, of
+   procedural type pt (§ 3.15): the value first, nil stopping the program
+   before the arguments, then call.ind with the function type of pt */
+static void routine(lxl *L, uint32_t node, limba_sym s, limba_ltype pt,
+                    limba_id *result)
 {
     limba_lxs *S = L->S;
-    const limba_typeinfo *sig = ti(L, S->st.sym[s].type);
+    const limba_typeinfo *sig = ti(L, s ? S->st.sym[s].type : pt);
     uint32_t first = sig->first, count = sig->count;
     uint32_t *ops = NULL, n = 0, cap = 0;
     /* a routine of C (§ 8.5): call.ext, an array its address alone, a
        record by value the address of its bytes (IR § 11e) */
-    bool ext = lxl_external(L, s);
+    bool ext = s && lxl_external(L, s);
     bool agg = sig->elem != S->ts.void_ && !lxl_scalar(L, sig->elem);
     limba_id slot = LIMBA_NONE;
-    if (lxl_has_env(L, s)) {
+    if (!s) {
+        limba_id f = lxl_value(L, S->t->node[node].a);
+        lxl_at(L, node);
+        limba_id null =
+            lxl_emit(L, LIMBA_OP_NULLV, LIMBA_T_PTR, 0, 0, 0, NULL, 0);
+        lxl_check(L, icmp(L, LIMBA_CC_NE, f, null), LXR_NIL);
+        LIMBA_GROW(ops, n, cap);
+        ops[n++] = f;
+    }
+    if (s && lxl_has_env(L, s)) {
         /* a nested routine: the environment of the routine around it,
            first (§ 8.9) */
         LIMBA_GROW(ops, n, cap);
@@ -365,13 +378,19 @@ static void routine(lxl *L, uint32_t node, limba_sym s, limba_id *result)
     lxl_at(L, node);
     /* what a nested routine reads must have a value here, what it
        assigns has one after (§ 5.5) */
-    lxl_nest_call(L, s, node, false);
     limba_id rt =
         sig->elem == S->ts.void_ || agg ? LIMBA_T_VOID : lxl_type(L, sig->elem);
-    limba_id r = lxl_emit(L, ext ? LIMBA_OP_CALLEXT : LIMBA_OP_CALL, rt, 0,
-                          L->func_of[s], 0, ops, n);
+    limba_id r;
+    if (s) {
+        lxl_nest_call(L, s, node, false);
+        r = lxl_emit(L, ext ? LIMBA_OP_CALLEXT : LIMBA_OP_CALL, rt, 0,
+                     L->func_of[s], 0, ops, n);
+        lxl_nest_call(L, s, node, true);
+    } else {
+        r = lxl_emit(L, LIMBA_OP_CALLIND, rt, 0, lxl_func_type(L, pt, false), 0,
+                     ops, n);
+    }
     free(ops);
-    lxl_nest_call(L, s, node, true);
     for (uint32_t b = 0; b < nbacks; b += 3) {
         limba_id x = un(L, LIMBA_OP_LOAD, backs[b + 2], backs[b + 1]);
         lxl_live(L, backs[b]);
@@ -1058,6 +1077,14 @@ void lxl_call(lxl *L, uint32_t node, limba_id *result)
     uint32_t callee = S->t->node[node].a;
     limba_sym s = S->sym[callee];
     *result = LIMBA_NONE;
+    limba_ltype ct = S->type[callee];
+    if (ct && ti(L, ct)->kind == LIMBA_LTK_PROC &&
+        (!s || S->st.sym[s].kind == LIMBA_LSYM_VAR ||
+         S->st.sym[s].kind == LIMBA_LSYM_PARAM ||
+         S->st.sym[s].kind == LIMBA_LSYM_CONST)) {
+        routine(L, node, 0, ct, result); /* through a value (§ 3.15) */
+        return;
+    }
     if (!s)
         return;
     const limba_symbol *y = &S->st.sym[s];
@@ -1070,7 +1097,7 @@ void lxl_call(lxl *L, uint32_t node, limba_id *result)
         return;
     }
     case LIMBA_LSYM_ROUTINE:
-        routine(L, node, s, result);
+        routine(L, node, s, 0, result);
         return;
     case LIMBA_LSYM_BUILTIN:
         lxl_at(L, node);

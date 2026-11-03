@@ -5,7 +5,8 @@
  * runs, written as its bytes (progetto_ir.md § 11h): a typed constant, a
  * variable ready at once. The bytes are those the stores of the aggregate
  * would leave, in the layout of its type; a String is a relocation to an
- * immortal string of the module.
+ * immortal string of the module, a routine (a value of a procedural type)
+ * a relocation to its function.
  *
  * What makes the IR large is a value repeated, not a large global
  * (decision of 22 Oct 2026): a run of one value of at least LXL_RUN bytes
@@ -31,6 +32,8 @@
    a larger one, element by element, each with the fills of its own runs
    (a fill holds bytes, not fills): data either way */
 #define LXL_IMAGE (1u << 20)
+/* a relocation to a routine, among those to strings */
+#define LXL_FUNC_REL 0x80000000u
 
 /* one scalar component: its bits, or a String, or a value main stores */
 typedef struct {
@@ -109,6 +112,17 @@ static void put_scalar(data *D, uint64_t off, uint32_t vn, limba_ltype t)
         if (it != LIMBA_T_PTR)
             D->ok = false;
         return; /* zeros */
+    }
+    if (v->kind == LXV_FUNC) {
+        /* a routine: a relocation to its function, kept with the strings
+           and told from them by the top bit */
+        if (it != LIMBA_T_PTR) {
+            D->ok = false;
+            return;
+        }
+        p.str = LXL_FUNC_REL | v->str;
+        add_put(D, p);
+        return;
     }
     if (x->kind == LIMBA_LTK_BIGINT) {
         /* a ref of the data is the BigInt 0, the only one there (voce 8) */
@@ -295,7 +309,8 @@ static int by_offset(const void *a, const void *b)
     return x->seq < y->seq ? -1 : x->seq > y->seq;
 }
 
-/* the strings of an image: their offsets and their ids in the source */
+/* the strings of an image: their offsets and their ids in the source, or
+   LXL_FUNC_REL | the symbol of a routine */
 typedef struct {
     uint64_t *off;
     uint32_t *str;
@@ -455,9 +470,13 @@ bool lxl_data(lxl *L, const limba_id *globals, uint32_t n, uint32_t init,
         qsort(sp, z.n, 2 * sizeof(*sp), by_str);
     limba_id *ids = limba_xcalloc(z.n ? z.n : 1, sizeof(*ids));
     for (uint32_t i = 0; i < z.n; i++) {
+        uint32_t id = (uint32_t)sp[2 * i + 1];
+        if (id & LXL_FUNC_REL) {
+            ids[i] = L->func_of[id & ~LXL_FUNC_REL];
+            continue;
+        }
         size_t sn;
-        const char *st =
-            limba_strtab_get(L->S->lx->strings, (uint32_t)sp[2 * i + 1], &sn);
+        const char *st = limba_strtab_get(L->S->lx->strings, id, &sn);
         ids[i] = limba_str_intern(L->m, st, sn);
     }
     /* the first piece of bytes from offset 0 is the bytes of the data, the
@@ -492,7 +511,10 @@ bool lxl_data(lxl *L, const limba_id *globals, uint32_t n, uint32_t init,
         }
         for (uint32_t s2 = 0; s2 < z.n; s2++) {
             limba_global_add_reloc(L->m, globals[k], (uint32_t)sp[2 * s2],
-                                   LIMBA_RELOC_STR, ids[s2], 0);
+                                   (sp[2 * s2 + 1] & LXL_FUNC_REL)
+                                       ? LIMBA_RELOC_FUNC
+                                       : LIMBA_RELOC_STR,
+                                   ids[s2], 0);
             any = true;
         }
         (void)any;

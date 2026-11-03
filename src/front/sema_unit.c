@@ -461,7 +461,15 @@ void lxs_use(limba_lxs *S, limba_sym what, uint32_t node, bool write)
         return;
     }
     LIMBA_GROW(S->uses, S->nuses, S->capuses);
-    S->uses[S->nuses++] = (limba_lxs_use){S->who, what, node, write};
+    S->uses[S->nuses++] = (limba_lxs_use){S->who, what, node, write, false};
+}
+
+void lxs_use_taken(limba_lxs *S, limba_sym what, uint32_t node)
+{
+    if (!S->who || !what)
+        return;
+    LIMBA_GROW(S->uses, S->nuses, S->capuses);
+    S->uses[S->nuses++] = (limba_lxs_use){S->who, what, node, false, true};
 }
 
 /* ---- before the names: Unit.Name, pragma hides ---- */
@@ -686,6 +694,8 @@ static void reach(limba_lxs *S, const use_index *x, uint32_t who,
             uint32_t i = x->idx[j];
             const limba_lxs_use *u = &S->uses[i];
             limba_sym s = u->what;
+            if (u->taken && wrote)
+                continue; /* the calls only: a value taken is no call */
             if (u->write && wrote)
                 wrote[s] = 1;
             if (first[s])
@@ -1005,7 +1015,8 @@ static void alias_captured(limba_lxs *S, const use_index *x,
         uint32_t k = use_key(x, todo[--n]);
         for (uint32_t j = x->off[k]; j < x->off[k + 1]; j++) {
             limba_sym m = S->uses[x->idx[j]].what;
-            if (seen[m] == walk || lxs_outer(S, m) != g->host)
+            if (S->uses[x->idx[j]].taken || seen[m] == walk ||
+                lxs_outer(S, m) != g->host)
                 continue;
             seen[m] = walk;
             todo[n++] = m;
@@ -1052,6 +1063,8 @@ static void alias_globals(limba_lxs *S, const use_index *x)
                 uint32_t k = use_key(x, todo[--n]);
                 for (uint32_t j = x->off[k]; j < x->off[k + 1]; j++) {
                     const limba_lxs_use *u = &S->uses[x->idx[j]];
+                    if (u->taken)
+                        continue; /* no call */
                     if (u->write)
                         wrote[u->what] = walk;
                     if (seen[u->what] == walk)

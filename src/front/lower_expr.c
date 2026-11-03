@@ -141,6 +141,9 @@ static limba_id constant(lxl *L, uint32_t node)
     }
     if (v->kind == LXV_NIL)
         return lxl_emit(L, LIMBA_OP_NULLV, LIMBA_T_PTR, 0, 0, 0, NULL, 0);
+    if (v->kind == LXV_FUNC) /* a routine, a value (§ 3.15) */
+        return lxl_emit(L, LIMBA_OP_FADDR, LIMBA_T_PTR, 0, L->func_of[v->str],
+                        0, NULL, 0);
     if (is_big(L, t)) {
         /* a BigInt: from an i64 when it fits, else from its digits */
         int64_t k;

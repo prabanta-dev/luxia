@@ -227,6 +227,11 @@ void lxl_nest_call(lxl *L, limba_sym n, uint32_t node, bool after);
 /* a read of a call no assignment reaches: tag k of lxl_nest_call */
 void lxl_nest_undefined(lxl *L, uint32_t k);
 
+/* the IR type of the function of a routine of signature t, or of the
+   values of procedural type t (the same rule, § 3.15): with the
+   environment of a nested routine first when env */
+limba_id lxl_func_type(lxl *L, limba_ltype t, bool env);
+
 /* the indices of array type t: 1, or more for an array of more */
 uint32_t lxl_dims(const lxl *L, limba_ltype t);
 /* the type of the cells of array type t: its elements past every index */

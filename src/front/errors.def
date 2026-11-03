@@ -152,3 +152,11 @@ LX_ERROR(101, LONE_OVERLOAD)    /* warning: overload on a routine alone */
 LX_ERROR(102, ALIASED)          /* one object given to a routine by two ways,
                                    one of which can change it */
 
+LX_ERROR(103, ROUTINE_VALUE)    /* the name of a routine where no procedural
+                                   type is expected */
+LX_ERROR(104, NOT_A_VALUE_ROUTINE) /* a nested, external or predefined
+                                      routine, or an operator, as a value */
+LX_ERROR(105, PROFILE)          /* a routine or a value of another profile
+                                   than the procedural type */
+LX_ERROR(106, PROC_TYPE_FORM)   /* a procedural type without a name, or with
+                                   a default value */

@@ -394,6 +394,8 @@ bool lxs_arg_fits(limba_lxs *S, uint32_t v, limba_param p)
     unsigned pk = p.type ? lxs_ty(S, p.type)->kind : 0;
     if (!p.type)
         return true;
+    if (S->pre[v] == 2)
+        return p.mode == LXS_IN && lxs_proc_fits(S, v, p.type);
     if (lxs_node(S, v)->kind == LXN_AGG) {
         if (p.mode != LXS_IN)
             return false;
@@ -414,7 +416,8 @@ bool lxs_arg_fits(limba_lxs *S, uint32_t v, limba_param p)
     if (at == S->ts.ureal)
         return pk == LIMBA_LTK_FLOAT;
     if (at == S->ts.nil)
-        return pk == LIMBA_LTK_POINTER || pk == LIMBA_LTK_OPAQUE;
+        return pk == LIMBA_LTK_POINTER || pk == LIMBA_LTK_OPAQUE ||
+               pk == LIMBA_LTK_PROC;
     return lxs_compatible(S, at, p.type);
 }
 
@@ -552,15 +555,19 @@ static void add_chain(limba_lxs *S, cands *c, limba_sym h, uint8_t level,
     }
 }
 
-limba_sym lxs_ovl_choose(limba_lxs *S, uint32_t node, uint32_t scope,
-                         limba_sym s)
+/* the routines the name s at callee (a REF) means in scope: those of
+   its chain, of the file and of the units when they say overload (§ 8.8,
+   § 11.3), hiding the homographs, from a nested routine those outside
+   too (§ 5.4); 0 when s alone, with nothing to choose (*out NULL) */
+uint32_t lxs_ovl_meanings(limba_lxs *S, uint32_t callee, uint32_t scope,
+                          limba_sym s, limba_sym **out)
 {
-    uint32_t callee = lxs_node(S, node)->a;
+    *out = NULL;
     bool qual = lxs_node(S, callee)->kind == LXN_REF &&
                 (lxs_node(S, callee)->flags & LXN_F_QUAL);
     bool merge = !qual && S->nunits && lxs_ovl_is(S, s);
     if (!merge && !lxs_ovl_next(S, s))
-        return s;
+        return 0;
     bool ci;
     uint32_t cu = lxs_unit_of(S, scope, &ci);
     cands C = {0};
@@ -614,9 +621,21 @@ limba_sym lxs_ovl_choose(limba_lxs *S, uint32_t node, uint32_t scope,
     } else if (!o || !C.n) {
         add_chain(S, &C, s, 0, cu, callee);
     }
-    limba_sym *cand = C.m, *ok = NULL;
-    uint32_t nc = 0, nall = C.n, capok = 0;
     free(C.level);
+    *out = C.m;
+    return C.n;
+}
+
+limba_sym lxs_ovl_choose(limba_lxs *S, uint32_t node, uint32_t scope,
+                         limba_sym s)
+{
+    uint32_t callee = lxs_node(S, node)->a;
+    limba_sym *cand;
+    uint32_t nall = lxs_ovl_meanings(S, callee, scope, s, &cand);
+    if (!cand)
+        return s;
+    limba_sym *ok = NULL;
+    uint32_t nc = 0, capok = 0;
     limba_sym chosen = 0;
     if (nall == 1) {
         chosen = cand[0];
@@ -637,6 +656,14 @@ limba_sym lxs_ovl_choose(limba_lxs *S, uint32_t node, uint32_t scope,
         uint32_t v = lxs_node(S, a)->kind == LXN_NAMED ? lxs_node(S, a)->b : a;
         if (!v || lxs_node(S, v)->kind == LXN_AGG)
             continue;
+        if (!S->pre[v] && lxs_routine_name(S, scope, v)) {
+            /* a name of a routine waits for its parameter (§ 8.8) */
+            S->sym[v] = lxs_routine_name(S, scope, v);
+            S->pre[v] = 2;
+            continue;
+        }
+        if (S->pre[v] == 2)
+            continue;
         if (!S->pre[v]) {
             lxs_expr(S, v, scope, 0);
             S->pre[v] = 1;
@@ -651,6 +678,7 @@ limba_sym lxs_ovl_choose(limba_lxs *S, uint32_t node, uint32_t scope,
         free(cand);
         return chosen;
     }
+    S->arg_scope = scope;
     for (uint32_t i = 0; i < nall; i++)
         if (fits(S, node, cand[i])) {
             LIMBA_GROW(ok, nc, capok);
