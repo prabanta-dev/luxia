@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Adopts the one change of Meri's API (Meri `4906d68`): `meri_compile_begin`
+  takes the options (none: the VM), `meri_env` is written with designated
+  initialisers, and the result of a run is freed with `meri_result_free`.
+  When the stacks of a run cannot be reserved, `luxia` now says so
+  (`luxia: cannot reserve ... for the run: ...`, status 1) instead of
+  reporting an out of memory trap.
 - `lx_gen` writes routines nested in routines (variables of the routine
   without a value, assigned by the first nested routine) and procedural
   types: variables and a typed constant table of them, calls through

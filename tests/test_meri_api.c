@@ -103,7 +103,7 @@ typedef struct {
 static void begin(void *ctx, const limba_module *m)
 {
     feed *f = ctx;
-    f->p = meri_compile_begin(m, &f->d);
+    f->p = meri_compile_begin(m, NULL, &f->d);
     f->failed = !f->p;
 }
 
@@ -145,7 +145,8 @@ static void run(const limba_module *m, const meri_program *p, outcome *o)
     if (!out || !err || !in) {
         CHECK(false, "no stream for the run");
     } else {
-        env = (meri_env){0, NULL, in, out, (uint64_t)64 << 20};
+        env =
+            (meri_env){.in = in, .out = out, .max_memory = (uint64_t)64 << 20};
         meri_run(p, "main", &env, &o->r);
         meri_flush(out, &o->r);
         o->status = meri_report(m, &o->r, err);
@@ -197,7 +198,7 @@ static void both(const char *name, const char *text, const char *want_out,
         /* the same module whole, its bodies kept */
         c = (limba_luxia_consumer){.keep_bodies = true};
         r = limba_luxia_compile_text(name, text, strlen(text), &o, &c, &mw);
-        pw = r == LIMBA_LUXIA_OK && mw ? meri_compile(mw, &d) : NULL;
+        pw = r == LIMBA_LUXIA_OK && mw ? meri_compile(mw, NULL, &d) : NULL;
         CHECK(pw, "%s: whole: %s", name, pw || !mw ? d.msg : "front end");
         if (pw) {
             run(mw, pw, &b);
@@ -206,7 +207,9 @@ static void both(const char *name, const char *text, const char *want_out,
                       a.r.code == b.r.code && a.r.pos == b.r.pos,
                   "%s: streamed \"%s\" \"%s\" %d, whole \"%s\" \"%s\" %d", name,
                   a.out, a.err, a.status, b.out, b.err, b.status);
+            meri_result_free(&b.r);
         }
+        meri_result_free(&a.r);
     }
     meri_program_free(f.p);
     meri_program_free(pw);
@@ -232,13 +235,14 @@ static void misuse(void)
         return;
 
     /* before the end: nothing runs */
-    p = meri_compile_begin(m, &d);
+    p = meri_compile_begin(m, NULL, &d);
     CHECK(p, "misuse: begin: %s", d.msg);
     if (p) {
         CHECK(meri_compile_func(p, 1, &d), "misuse: func 1: %s", d.msg);
         run(m, p, &o);
         CHECK(o.r.status == MERI_BADENTRY, "misuse: ran before the end: %d",
               o.r.status);
+        meri_result_free(&o.r);
         /* twice, then nothing more */
         CHECK(!meri_compile_func(p, 1, &d) && *d.msg,
               "misuse: function 1 given twice");
@@ -248,7 +252,7 @@ static void misuse(void)
     }
 
     /* a function never given, its body there: the end fails */
-    p = meri_compile_begin(m, &d);
+    p = meri_compile_begin(m, NULL, &d);
     if (p) {
         CHECK(!meri_compile_end(p, &d) && strstr(d.msg, "never given"),
               "misuse: ended without the bodies: %s", d.msg);
@@ -256,7 +260,7 @@ static void misuse(void)
     }
 
     /* not declared */
-    p = meri_compile_begin(m, &d);
+    p = meri_compile_begin(m, NULL, &d);
     if (p) {
         CHECK(!meri_compile_func(p, m->nfuncs, &d),
               "misuse: function %" PRIu32 " given", m->nfuncs);

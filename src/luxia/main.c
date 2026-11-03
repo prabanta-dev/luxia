@@ -114,7 +114,7 @@ typedef struct {
 static void begin(void *ctx, const limba_module *m)
 {
     feed *f = ctx;
-    f->p = meri_compile_begin(m, &f->d);
+    f->p = meri_compile_begin(m, NULL, &f->d);
     f->failed = !f->p;
 }
 
@@ -290,10 +290,15 @@ static int run(int argc, char **argv, const char **unit_dirs)
 
     /* a closed output is EPIPE at the write, not a signal (§ 11g) */
     signal(SIGPIPE, SIG_IGN);
-    env = (meri_env){argc - i, argv + i, stdin, stdout, max_memory};
+    env = (meri_env){.argc = argc - i,
+                     .argv = argv + i,
+                     .in = stdin,
+                     .out = stdout,
+                     .max_memory = max_memory};
     meri_run(f.p, "main", &env, &r);
     meri_flush(stdout, &r);
     status = meri_report(m, &r, stderr);
+    meri_result_free(&r);
     meri_program_free(f.p);
     limba_module_free(m);
     return status;
