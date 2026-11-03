@@ -560,6 +560,67 @@ or be narrowed with `range`. On a `BitsN`, which wraps in its
 arithmetic, `succ` and `pred` are still checked (§ 9.3), and a `for`
 ends at its last bound without wrapping (§ 7.5).
 
+### 3.15 Procedural types
+
+```pascal
+type
+  Compare = function(a, b: Int32): Boolean;
+  Action = procedure(var n: Int64);
+
+function Less(a, b: Int32): Boolean; begin return a < b; end Less;
+
+var cmp: Compare := Less;     // the routine itself, as a value
+...
+if cmp(1, 2) then ... end;    // a call through the value
+cmp := nil;
+```
+
+A **procedural type** is the type of a routine. Its values are the
+routines of the level of a file, of the program or of a unit, and `nil`.
+
+- It is declared **only with a name**, in a `type` section: written
+  anywhere else (a parameter, a field, the element of an array, the
+  target of a pointer) it is a compile-time error. The names of its
+  parameters are documentation: a call through a value gives its
+  arguments by position only (§ 8.7). Its parameters have no default
+  values.
+- **Profile.** A routine goes to a procedural type when both have the
+  same number of parameters, with the same modes and the **same types**,
+  ranges included (`Int32 range 1..9` is not `Int32`), and the same
+  result, or no result for both. The names of the parameters do not
+  count.
+- **Types by name.** Two procedural types declared in two places are two
+  types, as two records are (§ 6.2), even with the same profile; a value
+  of one becomes the other with a conversion (§ 6.6). The name of a
+  routine goes to every procedural type of its profile.
+- **Where the name of a routine is a value.** Only where the type
+  expected is procedural, the name of a routine without parentheses is
+  that routine: on the right of an assignment, as the initial value of a
+  variable whose type is written, as an argument (§ 8.8), after `return`,
+  as a component of an aggregate, and as the operand of `=` or `<>`
+  whose other operand has a procedural type. Elsewhere it is a
+  compile-time error: `var c := Less` has no type to infer, and
+  `Less = More` compares two values without a type, as two aggregates
+  (§ 6.2). An overloaded name gives the routine of the profile of the
+  type expected, the only one (§ 8.8).
+- **What is not a value**: a nested routine (§ 8.9), an external routine
+  (§ 8.5), a routine of the language (§ 9) and an operator (§ 6.9).
+  What counts is the routine chosen, not the name: a `str` a program
+  adds for one of its types (§ 9.4) is a value, the predefined `str` is
+  not.
+- **A call through a value**: any designator of a procedural type
+  followed by its arguments in parentheses, `cmp(1, 2)`, `ops[i](n)`,
+  `Pick()(1, 2)`. A `nil` value is a run-time error, "nil" (`nil_check`,
+  § 10.1), found before the arguments are evaluated. The rules of a call
+  hold as for a call by name (§ 7.7, § 8.1): a function called so as a
+  statement is still a compile-time error.
+- `=` and `<>` compare which routine a value is; `nil` equals `nil`.
+  Procedural values have no order.
+- A procedural variable without an initial value is `nil` when it is a
+  variable of a file, a component of a record or an array, or made by
+  `new`; a local one is not assigned (§ 5.5).
+- A procedural value does not cross the boundary with C (§ 8.5).
+
 ## 4. Constants and constant expressions
 
 ### 4.1 Literals
@@ -630,6 +691,16 @@ components are all known at compile time.
   as in Delphi; it has its value before any code runs.
 - A typed constant of a scalar type is a value, usable in constant
   expressions, as any constant.
+- A constant of a **procedural type** (§ 3.15) is written with its type
+  and the name of a routine, or `nil`: `const First: Compare = Less;`.
+  The name of a routine is a value known at compile time, as `nil` is:
+  it goes in typed constants, default values, and the components of
+  typed constants and of variables ready at once (§ 11.5), `const Ops:
+  array[Int32 range 1..2] of Compare = {Less, More};`; it is not a
+  constant expression (not a bound of an array, a label of `case`, nor
+  an argument of a pragma). A constant of an interface may name a
+  routine of the implementation of its unit: the routine is then called
+  outside the unit through the constant, and not by its name.
 
 ## 5. Declarations and scope
 
@@ -654,8 +725,8 @@ var
   and of routines, as in Pascal; sections (and, at the level of the
   file,
   routines) may appear **in any order and may repeat**.
-- Routines are declared only at the level of the file, program or unit
-  (§ 8.4, § 11).
+- Routines are declared at the level of the file, program or unit
+  (§ 11), and inside a routine of that level, one level deep (§ 8.9).
 
 ### 5.2 Declarations as statements
 
@@ -692,11 +763,41 @@ is a compile-time error.
   cannot contain itself except through a pointer.
 - The names of the units a file uses, and the names of their
   interfaces, are visible as § 11.3 says.
+- A **nested routine** (§ 8.9) is a routine of the scope of the routine
+  that contains it: without `overload` it hides every meaning of its
+  name from outside, as a variable would; with `overload` it joins the
+  routines of its name visible from outside, if all of them say
+  `overload`, and hides only those with the same types of parameters
+  (§ 8.8), as a routine of a file does with those of a unit (§ 11.3),
+  without the warning.
 
 ### 5.5 Definite assignment
 
 Reading a variable that is not assigned on every path to the read is a
 compile-time error.
+
+A **call of a nested routine** (§ 8.9) acts on the variables of the
+routine that contains it, parameters included, at the point of the call,
+after its arguments and on the path where it is evaluated (in the second
+operand of `and` or in a branch of `if`, only there):
+
+- it **reads** the variables that the nested routine can read, on some
+  path, before it assigns them itself: they must be assigned before the
+  call, or the call is a compile-time error that names the variable and
+  the routine. A call of another nested routine inside it counts at the
+  point of that call, path by path, as here: in `total := 0; B();`, a
+  read of `total` by `B` is no read before an assignment;
+- then it **assigns** the variables that the nested routine assigns on
+  every path that returns. A routine that gives the initial values
+  (`Reset()`) thus needs no values written only to please the compiler,
+  and a scalar `out` parameter of the enclosing routine may be assigned
+  by such a call.
+
+The nested routines of a routine see each other and may call each other
+in any order: the two sets are computed for all of them together, the
+reads as the smallest set closed under the calls, the assignments by
+growing them from none until the calls change them no more (a path that
+never returns does not count).
 
 ## 6. Expressions
 
@@ -745,6 +846,7 @@ primary: `2 ** -1` is written `2 ** (-1)`, as in Ada.
 | C types by name (`CInt`, `CDouble`, ...) | yes | yes, as their representation (§ 3.13) |
 | `CBool` | yes | yes, `false < true` |
 | pointers (and `nil`) | yes | no |
+| procedural types (and `nil`, § 3.15) | yes, the same routine | no |
 | `CPointer` and opaque pointer types (and `nil`) | yes | no |
 | records, arrays | yes, component by component (below) | no |
 
@@ -773,7 +875,9 @@ end Same;
   base are included.
 - An **aggregate** operand takes the type of the other operand, on
   either side (§ 6.8); between two aggregates there is no type (a
-  compile-time error).
+  compile-time error). The name of a routine likewise takes the
+  procedural type of the other operand (`cmp = Less`); between two names
+  of routines (`Less = More`) there is no type, a compile-time error.
 - `a = b` is true when the two values have **the same components**:
   records field by field, in the order of the declaration; arrays when
   they have the **same length** and the same elements **in the same
@@ -893,6 +997,9 @@ A conversion is written as a call of the target type: `Float64(i)`,
   value whose rounding exceeds the largest finite value of the type (from
   that value plus half a unit in the last place upwards) gives an
   infinity with the sign of `b`.
+- **Between procedural types** (§ 3.15) of the same profile: `T2(a)` is
+  the same routine as a value of `T2`, and `nil` stays `nil`. Between
+  types of different profiles it is a compile-time error.
 
 ### 6.7 Order of evaluation
 
@@ -1128,6 +1235,11 @@ context-free.
 called as a statement is an error. A designator that is not a call is not
 a statement.
 
+A routine is called by its name, or through a value of a procedural type
+(§ 3.15): `cmp(a, b)`, `actions[i](n)`. The arguments of a call through
+a value go by position only (§ 8.7); the value is evaluated first, and a
+`nil` value stops the program before the arguments are evaluated.
+
 ### 7.8 Declarations and pragmas as statements
 
 `var` and `const` statements are described in § 5.2; `pragma` statements
@@ -1188,7 +1300,12 @@ end;
   - a global variable, or a part of it, given to a `var` or `out`
     parameter or as a record or an array without a mode to a routine
     that can write that global, following the calls as the order of
-    initialisation does (§ 11.5).
+    initialisation does (§ 11.5);
+  - in the same way, a variable or a parameter of a routine, or a part
+    of it, given so to a routine nested in it (§ 8.9) that can write
+    that variable, following the calls among the nested routines of the
+    same routine: with `procedure Fix(r: Row)` nested and writing
+    `rows`, `Fix(rows[1])` is an error.
 
   Where it cannot tell, as with indices computed at run time
   (`Swap(a[i], a[j])`), the call is allowed and its effect is the one
@@ -1213,9 +1330,10 @@ end;
 A routine can be used before its definition in the same file, with no
 `forward` declaration.
 
-### 8.4 Not in Luxia 0
+### 8.4 Nesting
 
-No nested routines. Overloading: § 8.8.
+A routine may contain routines, one level deep: § 8.9. Overloading:
+§ 8.8.
 
 ### 8.5 External routines
 
@@ -1247,8 +1365,9 @@ function sqrtf(x: CFloat): CFloat;
   is missing it stops at once with a message, never halfway through. An
   external routine that no call can reach (a routine of a unit the
   program does not call) asks for nothing.
-- An external routine is called as any other; its address cannot be
-  taken in Luxia 0.
+- An external routine is called as any other; it is not a value of a
+  procedural type (§ 3.15): routines given to C as pointers are planned
+  (Appendix A).
 - **What crosses the boundary**, as parameters and as the result:
   - the integers of fixed size (`Int8`..`Int64`, `UInt8`..`UInt64`,
     `Bits8`..`Bits64`, C's `int8_t`..`uint64_t`), `Float32` (`float`),
@@ -1326,8 +1445,9 @@ Draw(y => 20, x => 10, colour => Red);
   not in the order of the parameters.
 - Arguments by name are given to the routines of the program and of its
   units, external routines included; not to the routines of the
-  predefined library (§ 9) nor to a conversion, whose parameters have no
-  names.
+  predefined library (§ 9), nor to a conversion, whose parameters have
+  no names, nor to a call through a value of a procedural type (§ 3.15),
+  whose parameter names are documentation.
 - The names of the parameters of a routine of an interface are part of
   what the unit offers (§ 11.2): a program may name them.
 
@@ -1366,8 +1486,12 @@ procedure Show(v: Vector; width: Int32); overload;
   - a constant without a type, **by kind, not by value**: an integer to
     every integer type, `BigInt` and the reals; a real to the reals; its
     value is checked after the choice;
-  - `nil` to every pointer; an aggregate to every record or array its
-    components fit by form;
+  - `nil` to every pointer and procedural type; an aggregate to every
+    record or array its components fit by form;
+  - the name of a routine to a parameter of a procedural type when a
+    routine of that name has its profile (§ 3.15); since two routines of
+    one name never have the same types of parameters, that routine is
+    the only one;
   - an argument of a `var` or `out` parameter is a variable of its type.
 
   The call goes to the **only** candidate. None is an error that lists
@@ -1379,6 +1503,63 @@ procedure Show(v: Vector; width: Int32); overload;
   symbol with `name` (§ 8.5).
 - In units, the routines of one name that come from several units of
   the same level, all with `overload`, are one name (§ 11.3).
+- The nested routines of one routine follow these rules among them; with
+  the routines of the same name outside, the rule of § 5.4. A nested
+  routine with `overload` that joins no other routine, nested or
+  outside, gets the warning of a routine alone.
+
+### 8.9 Nested routines
+
+```pascal
+procedure Report(var rows: Table; title: String);
+var total: Int64;
+    shown: Int32;
+
+  procedure Reset();               // assigns total and shown
+  begin
+    total := 0;
+    shown := 0;
+  end Reset;
+
+  procedure Line(r: Row);          // sees rows, title, total, shown
+  begin
+    total := total + r.amount;
+    shown := shown + 1;
+    writeln(title, ": ", r.amount);
+  end Line;
+
+begin
+  Reset();                         // from here total and shown are assigned
+  for var i: Int32 := low(rows) to high(rows) do
+    Line(rows[i]);
+  end;
+  writeln(total, " in ", shown);
+end Report;
+```
+
+- A routine of the level of a file may declare routines among its
+  declarations, with its `const`, `type` and `var` sections, in any
+  order. A nested routine contains no routine (one level only), is not
+  external (the routines of C are declared at the level of a file,
+  § 8.5) and is no operator (§ 6.9).
+- **What it sees**: the parameters of the routine that contains it; its
+  constants and types; its variables declared **before** the nested
+  routine, as for every constant and variable (§ 5.4), not those
+  declared as statements in its body (§ 5.2); the other nested routines
+  of the same routine, in any order; the names of the file, but those
+  it hides (§ 5.4).
+- It **reads and writes** the variables and the parameters of the
+  routine that contains it with their rules: a parameter without a mode
+  stays constant, a scalar `out` one is the copy of the containing
+  routine (§ 8.1). Definite assignment follows the calls (§ 5.5).
+- **Who calls it**: the routine that contains it and the other nested
+  routines of that routine. It is not named from outside, and it is not
+  a value of a procedural type (§ 3.15). It may be recursive.
+- Default values, arguments by name and overloading are those of every
+  routine (§ 8.6-8.8); `return`, `exit` and `continue` act inside it,
+  never on the routine that contains it.
+- In a unit a nested routine is in the body of its routine, in the
+  implementation: never in the interface.
 
 ## 9. The predefined library
 
@@ -1810,7 +1991,9 @@ declarations of a unit, the pragma applies to that unit. The **standard
 library** may declare external routines (it is its boundary with C),
 but a program under the restriction may **reach none of them**: a call
 that leads to an external routine of the library is a compile-time
-error that shows the chain of calls. The routines of the language
+error that shows the chain of calls. The chain also passes through the
+calls through a value of a procedural type, which reach the routines of
+§ 11.5. The routines of the language
 (§ 9) are not external. A program that compiles so has no unchecked
 boundary.
 
@@ -1994,9 +2177,9 @@ end.
   never changes the meaning of a program and never stops it from
   compiling: at most it adds a warning. One case only stops it, never
   silently: a new routine with `overload` and other types of parameters
-  joins its name, and a call with a constant without a type, `nil` or an
-  aggregate that went to one routine may now go to two, an ambiguity
-  (§ 8.8).
+  joins its name, and a call with a constant without a type, `nil`, an
+  aggregate or the name of a routine that went to one routine may now
+  go to two, an ambiguity (§ 8.8).
 - **A qualifier that names a used unit is always the unit.** If a used
   unit exports a name equal to another used unit (a variable `Text`
   while the file uses the unit `Text`), `Text.X` is `X` of the unit
@@ -2075,9 +2258,16 @@ end.
   - if the constraints form a circle, it is a compile-time error that
     shows the chain of reads and calls; the code is moved, there is no
     pragma to force an order.
-- The analysis follows every call to its target (Luxia has no pointers
-  to routines). It works on the text: a read inside a branch that never
-  runs counts all the same, and the message says so.
+- The analysis follows every call to its target. A call through a value
+  of a procedural type `T` (§ 3.15) may reach every routine whose name
+  is given somewhere in the program as a value of `T`, or of a type
+  joined to `T` by a conversion written in the program; it counts as a
+  call of each, and a circle shows that step with the place where the
+  value is given. Taking the value of a routine counts as a call of it
+  where the value is taken; a typed constant that names a routine,
+  where the constant is declared. It works on the text: a read inside a
+  branch that never runs counts all the same, and the message says
+  so.
 - Without cycles of `uses`, every unit is initialised after the units it
   uses, as in Delphi.
 - There is no finalisation: the memory of the program is returned when
@@ -2126,7 +2316,7 @@ Routine    = ( "procedure" RName Params | "function" RName Params ":" Type )
              ";" [ "overload" ";" ]
              ( { LocalDecl } "begin" Stmts "end" [ RName ] ";"
              | "external" string [ ident string ] ";" ) .
-LocalDecl  = ConstSec | TypeSec | VarSec | Pragma ";" .
+LocalDecl  = ConstSec | TypeSec | VarSec | Routine | Pragma ";" .
 Params     = "(" [ Param { ";" Param } ] ")" .
 Param      = [ "var" | "out" ] IdentList ":" Type [ ":=" Expr ] .
 Type       = QualIdent [ "range" ( Range | "<>" ) ]
@@ -2134,7 +2324,9 @@ Type       = QualIdent [ "range" ( Range | "<>" ) ]
            | "(" IdentList ")"
            | "array" "[" Type { "," Type } "]" "of" Type
            | "record" { IdentList ":" Type ";" } "end"
-           | "^" Type .
+           | "^" Type
+           | "procedure" Params
+           | "function" Params ":" Type .
 Range      = Simple ".." Simple .
 Stmts      = { Stmt ";" } .
 Stmt       = ( Designator [ ":=" Expr ]
@@ -2179,7 +2371,9 @@ its exponent is a `Primary`.
 The semantic analysis rejects some constructs the grammar lets through,
 to give better messages: a function call used as a statement, a
 designator that is not a call used as a statement, `x:w:d` outside
-`write`/`writeln`, a routine inside another, and a field or an index
+`write`/`writeln`, a routine inside a nested routine, an external or an
+operator nested in a routine (§ 8.9), a procedural type outside a `type`
+declaration and a default value in it (§ 3.15), and a field or an index
 after `^` (`p^.x`, `p^[i]`: § 3.10). In an external
 routine, the `ident` before the second `string` must be `name`, a
 contextual word with that meaning only there, not a keyword.
@@ -2222,6 +2416,9 @@ and tools can anticipate them.
   subtypes.
 - Subtypes of `BigInt` with a range; functions of `BigInt` beyond its
   operators (greatest common divisor, square root, exact division).
+- Procedural types written without a name, in a parameter; nested
+  routines more than one level deep, and given as arguments to the
+  routines that call them.
 - Routines of Luxia given to C as pointers to functions (callbacks),
   and variadic C functions (`printf`); a tool that writes the external
   declarations from the headers of a C library, so that the signature is
