@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- An error at run time no handler takes is reported with the name of its
+  exception: `luxia: IndexError: index out of range at prog.luxia:12:5`.
+  Every module carries the table of the predefined exceptions.
 - Specification of exceptions (step 4 of Luxia 1, code to follow):
   `type E = exception(P)`, `raise E with m`, `raise;`, `try ... except
   when A, B var e: ... else ... finally ... end`, the predefined families

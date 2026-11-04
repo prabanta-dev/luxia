@@ -2,6 +2,24 @@
 memory strict
 ptr_bits 64
 language "luxia"
+exception 900 "ConstraintError"
+exception 6 "OverflowError" parent 900
+exception 11 "DivisionError" parent 900
+exception 100 "IndexError" parent 900
+exception 101 "RangeError" parent 900
+exception 102 "NilError" parent 900
+exception 103 "ConversionError" parent 900
+exception 104 "ShiftError" parent 900
+exception 105 "DanglingError" parent 900
+exception 108 "LengthError" parent 900
+exception 901 "StorageError"
+exception 7 "StorageError" parent 901
+exception 28 "StorageError" parent 901
+exception 902 "ProgramError"
+exception 106 "ProgramError" parent 902
+exception 109 "ProgramError" parent 902
+exception 903 "InputOutputError"
+exception 107 "InputOutputError" parent 903
 type %Vec = { i32 @0, i32 @4 } size 8 align 4
 global @u : %Vec = data "\x01\x00\x00\x00\x02"
 pos 1 "names.luxia" 9 3

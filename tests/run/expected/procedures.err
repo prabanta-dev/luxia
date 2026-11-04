@@ -1,1 +1,1 @@
-luxia: nil dereferenced at procedures.luxia:61:3
+luxia: NilError: nil dereferenced at procedures.luxia:61:3

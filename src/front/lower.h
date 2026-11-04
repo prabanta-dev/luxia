@@ -202,6 +202,9 @@ typedef struct {
     uint32_t nrplace, caprplace;
 } lxl;
 
+/* exceptions (lower_exc.c, § 3.16, § 7.9): the table of the module */
+void lxl_exc_table(lxl *L);
+
 /* nested routines (lower_nest.c, § 8.9) */
 /* the environments and the sets of definite assignment, once */
 void lxl_nest_prepare(lxl *L);

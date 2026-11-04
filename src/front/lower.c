@@ -1795,6 +1795,9 @@ limba_module *limba_lxl_program_each(limba_lxs *S,
     end_function(L, last, false);
 
 done:
+    /* the traps named after their exceptions (§ 10.1): last, so that the
+       strings of the program keep their numbers */
+    lxl_exc_table(L);
     for (uint32_t s = 0; s <= S->st.nsym; s++)
         free(L->store[s].dims);
     free(L->store);

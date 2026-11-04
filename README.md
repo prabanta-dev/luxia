@@ -118,7 +118,7 @@ Errors in the source are reported, each with a stable code
 ([`doc/diagnostics.md`](doc/diagnostics.md)), and nothing runs (exit
 status 1). Once it runs, a program behaves as under `meri`: a run-time
 error stops it with a message on the standard error and exit status 1,
-`luxia: index out of range at program.luxia:12:5`; `halt(code)` exits
+`luxia: IndexError: index out of range at program.luxia:12:5`; `halt(code)` exits
 with `code`; past the memory `--max-memory` gives it, "out of memory",
 never a crash; a program whose output is closed (`program | head`) ends
 with status 141 and no message.
