@@ -91,10 +91,11 @@ the quickest way to have a source checked.
 
 This document covers the errors found at compile time. The errors found
 while the program runs (overflow, index, range, `nil`, division by zero,
-conversion, shift count, an error of input or output) are a separate
-matter: they stop the program with a message such as `luxia: index out
-of range at prog.luxia:12:5` and exit status 1, and they are described in
-§ 10 of the specification. An output closed by its reader ends the
+conversion, shift count, length, an error of input or output) are a
+separate matter: they raise exceptions (§ 7.9 of the specification), and
+one that no handler takes stops the program with a message such as
+`luxia: IndexError: index out of range at prog.luxia:12:5` and exit
+status 1, as § 10 of the specification describes. An output closed by its reader ends the
 program without a message and with exit status 141.
 
 ## Lexical errors
@@ -2320,6 +2321,162 @@ prog.luxia:2:20: error[L0106]: a procedural type is declared with a name, in a t
 prog.luxia:2:37: error[L0106]: a procedural type has no default values: a call through a value gives every argument
 ```
 
+## Exceptions
+
+### L0107 — EXCEPTION OUT OF PLACE
+
+An exception is declared at the level of a file, in a `type` section,
+and is no type of values (§ 3.16): declared inside a routine, used as
+the type of a variable, a parameter or a component, or given a parent
+that is not an exception, or parents that form a circle.
+
+```pascal
+program p;
+procedure Parse();
+type Bad = exception;
+begin
+end;
+begin
+  Parse();
+end.
+```
+
+```
+prog.luxia:3:6: error[L0107]: an exception is declared at the level of a file, not inside a routine
+```
+
+### L0108 — HANDLER
+
+A branch of `except` that can never be reached: a family before one of
+its children, the same exception twice (also written in two ways,
+`NotFound` and `Files.NotFound`), a family and its child in one branch;
+`when StorageError:`, which no handler may take; `when var e:` that is
+not the last branch, or together with `else`; an exception of the
+program child of `StorageError` (§ 3.16, § 7.9).
+
+```pascal
+program p;
+begin
+  try
+    writeln(1 div 0);
+  except
+    when ConstraintError:
+      writeln("constraint");
+    when DivisionError:
+      writeln("division");
+  end;
+end.
+```
+
+```
+prog.luxia:7:10: error[L0108]: this branch is never reached: ConstraintError, a branch before it, takes DivisionError
+```
+
+### L0109 — RAISE OUT OF PLACE
+
+`raise;` outside a branch of `except` (§ 7.9); `external "runtime"`
+outside the units of the standard library (§ 8.5).
+
+```pascal
+program p;
+begin
+  raise;
+end.
+```
+
+```
+prog.luxia:3:3: error[L0109]: raise without an exception raises the one of a handler again: it goes only inside a branch of except
+```
+
+### L0110 — JUMP OUT OF FINALLY
+
+`return`, `exit` and `continue` that would leave a `finally` (§ 7.9).
+
+```pascal
+program p;
+function F(): Int32;
+begin
+  try
+    return 1;
+  finally
+    return 2;
+  end;
+end;
+begin
+  writeln(F());
+end.
+```
+
+```
+prog.luxia:7:5: error[L0110]: return would leave a finally: a finally runs to its end
+```
+
+### L0111 — HANDLERS FORBIDDEN
+
+A `try` under `pragma restrictions(no_handlers)`, in the program or in
+its units, or a routine of the library with a `try` that the program
+reaches, with the chain of calls (§ 10.4).
+
+```pascal
+program p;
+pragma restrictions(no_handlers);
+begin
+  try
+    writeln(1);
+  finally
+    writeln(2);
+  end;
+end.
+```
+
+```
+prog.luxia:4:3: error[L0111]: pragma restrictions(no_handlers) forbids try
+```
+
+### L0112 — OCCURRENCE
+
+The occurrence named in a branch is read only by `e.message`,
+`e.position` and `e.name` (§ 3.16): another component, an assignment,
+an argument by address.
+
+```pascal
+program p;
+begin
+  try
+    writeln(1 div 0);
+  except
+    when DivisionError var e:
+      writeln(e.code);
+  end;
+end.
+```
+
+```
+prog.luxia:7:16: error[L0112]: an occurrence has message, position and name only
+```
+
+### L0113 — LENGTH
+
+An array assigned whole from a value of another length, when both
+lengths are known at compile time (§ 7.1); otherwise it is the run-time
+error `LengthError`.
+
+```pascal
+program p;
+procedure Fill(var a: array[Int32 range <>] of Int32);
+begin
+  a := {1, 2, 3};
+end;
+var v: array[Int32 range 1..2] of Int32;
+begin
+  Fill(v);
+end.
+```
+
+The length of `v` is known only at the call, so this one is a run-time
+`LengthError`; an assignment between two arrays of fixed bounds of
+different lengths is already a type mismatch (L0027).
+
 ## All the codes
 
 | Code | Name | Meaning |
@@ -2430,3 +2587,10 @@ prog.luxia:2:37: error[L0106]: a procedural type has no default values: a call t
 | L0104 | NOT_A_VALUE_ROUTINE | a nested, external or predefined routine as a value |
 | L0105 | PROFILE | a routine or a value of another profile than the procedural type |
 | L0106 | PROC_TYPE_FORM | a procedural type without a name, or with a default value |
+| L0107 | EXCEPTION_PLACE | an exception inside a routine, as a type of values, with a parent that is not one |
+| L0108 | HANDLER | a branch never reached, `when StorageError:`, `when var e:` not last |
+| L0109 | RAISE_PLACE | `raise;` outside a branch; `external "runtime"` outside the library |
+| L0110 | FINALLY_JUMP | `return`, `exit`, `continue` leaving a `finally` |
+| L0111 | NO_HANDLERS | `try` under `restrictions(no_handlers)`, also reached in the library |
+| L0112 | OCCURRENCE | the occurrence used other than by `message`, `position`, `name` |
+| L0113 | LENGTH | arrays assigned whole with lengths known and different |

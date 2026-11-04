@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Specification of exceptions (step 4 of Luxia 1, code to follow):
+  `type E = exception(P)`, `raise E with m`, `raise;`, `try ... except
+  when A, B var e: ... else ... finally ... end`, the predefined families
+  (`ConstraintError`, `StorageError`, `ProgramError`,
+  `InputOutputError`), the occurrence (`e.message`, `e.position`,
+  `e.name`), the message of an exception no handler takes with its name,
+  arrays assigned whole with a length check (`LengthError`), the check of
+  `var` parameters of narrow subtypes, `restrictions(no_handlers)`;
+  diagnostics L0107-L0113.
 - Adopts the one change of Meri's API (Meri `4906d68`): `meri_compile_begin`
   takes the options (none: the VM), `meri_env` is written with designated
   initialisers, and the result of a run is freed with `meri_result_free`.

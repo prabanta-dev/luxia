@@ -39,7 +39,8 @@ reverse-complement and spectral-norm.
 
 Examples are written in Luxia. The grammar (§ 12) uses Wirth's EBNF.
 "Compile-time error" means the program is rejected; "run-time error"
-means a failed check that stops the program (§ 10).
+means a failed check, which raises an exception and stops the program
+unless a handler takes it (§ 7.9, § 10).
 
 The source file extension is `.luxia`.
 
@@ -75,21 +76,25 @@ library, § 9) cannot be declared again; `str` takes more meanings with
 Keywords are reserved, English, and **lowercase only**. By the case rule
 above, `BEGIN` is an error, not an identifier.
 
-The 52 keywords are:
+The 57 keywords are:
 
 ```
 abs            and            array          begin          case
 const          continue       div            do             downto
-else           elsif          end            exit           external
-false          for            function       if             implementation
-in             interface      loop           mod            new
-nil            not            of             or             out
-overload       pragma         procedure      program        range
-record         rem            repeat         return         shl
-shr            then           to             true           type
+else           elsif          end            except         exception
+exit           external       false          finally        for
+function       if             implementation in             interface
+loop           mod            new            nil            not
+of             or             out            overload       pragma
+procedure      program        raise          range          record
+rem            repeat         return         shl            shr
+then           to             true           try            type
 unit           until          uses           var            when
 while          xor
 ```
+
+`with` (in `raise E with m`, § 7.9) and `name` (in `external`, § 8.5)
+are contextual words, not keywords.
 
 `true`, `false` and `nil` are keywords (literals), not predefined names.
 `abs` is an operator (§ 6), not a library function. `unit`, `uses`,
@@ -313,9 +318,9 @@ type Vector = array[Int32 range <>] of Float64;
 - Modes: without a mode the elements are read-only; with `var` (or `out`)
   the elements can be written, while the bounds remain those of the
   argument. The array is always passed by address: no copy is made.
-- In Luxia 0 an open-array parameter is not assigned as a whole
-  (`a := b`): the program works on its elements. It is **compared** as a
-  whole (`a = b`, § 6.2).
+- An open-array parameter with `var` or `out` is assigned as a whole
+  (`a := b`, § 7.1), with a length check; it is **compared** as a whole
+  (`a = b`, § 6.2).
 - An open-array parameter can be passed on to another open-array
   parameter, with the same bounds.
 - An aggregate passed to an open-array parameter has the bounds given
@@ -460,8 +465,10 @@ This follows Ada's treatment of uninitialised objects in its strict form
 - A **comparison** of records or arrays (`r = s`, § 6.2) reads their
   components: an invalid value it reaches is a range error, reported at
   the operator.
-- A value read by another route (a scalar `var` parameter bound to a
-  component) is not checked in Luxia 0: it keeps the invalid value.
+- A value read by another route, a scalar `var` parameter of a narrow
+  subtype bound to a component, **is checked at each read** of the
+  parameter as a component is: an invalid value is a range error,
+  reported at the read.
 - A scalar variable needs none of this: reading it before assigning it is
   a compile-time error (definite assignment, § 5.5).
 - An aggregate gives every component a value (§ 6.8): its scalar
@@ -474,8 +481,8 @@ This follows Ada's treatment of uninitialised objects in its strict form
 
 - Its arithmetic **never overflows**: `+`, `-`, `*`, `**`, `abs` and the
   unary minus give the exact value. The only limit is memory: a value
-  that does not fit in it stops the program with "out of memory"
-  (§ 10.1), as a string does.
+  that does not fit in it is "out of memory", a `StorageError` (§ 10.1),
+  as a string is.
 - It is **immutable and reference-counted**, as a `String`: an
   assignment shares a value, every operation makes a new one, and the
   sharing is never visible. Two `BigInt` values are compared by value,
@@ -620,6 +627,39 @@ routines of the level of a file, of the program or of a unit, and `nil`.
   variable of a file, a component of a record or an array, or made by
   `new`; a local one is not assigned (§ 5.5).
 - A procedural value does not cross the boundary with C (§ 8.5).
+
+### 3.16 Exceptions
+
+```pascal
+type
+  ParseError = exception;                 // an exception of the program
+  BadDigit = exception(ParseError);       // of the family of ParseError
+```
+
+An **exception** is an identity with a name, declared as a type, with at
+most one **parent**: a handler of the parent takes its children too
+(§ 7.9). It has no fields and is no object; it is not a type of values:
+no variable, parameter or component has it.
+
+- Exceptions are declared at the level of a file only (the program, the
+  interface or the implementation of a unit), not inside a routine. One
+  declared in an implementation that leaves its unit is taken outside
+  only by its family or by a handler of everything (§ 7.9).
+- The parent is an exception; the parents form no circle.
+- **The predefined exceptions**, the run-time errors (§ 10.1), in four
+  families: `ConstraintError`, with `OverflowError`, `DivisionError`,
+  `IndexError`, `RangeError`, `NilError`, `ConversionError`,
+  `ShiftError`, `DanglingError`, `LengthError`; `StorageError` (out of
+  memory, stack overflow), which no handler takes (§ 10.1); `ProgramError`
+  (invalid dispose, invalid file handle); `InputOutputError`.
+  An exception of the program cannot be a child of `StorageError`.
+- An **occurrence** is an exception raised: its identity, a message (a
+  `String`, empty if none) and the place where it was raised. A handler
+  that names it reads `e.message`, `e.position` (a `String`
+  `"file:line:column"`, `""` without a place) and `e.name` (the name of
+  the exception, qualified by its unit for one of a unit:
+  `"Files.NotFound"`; `"IndexError"`); nothing else of it, and only in
+  that handler.
 
 ## 4. Constants and constant expressions
 
@@ -798,6 +838,12 @@ in any order: the two sets are computed for all of them together, the
 reads as the smallest set closed under the calls, the assignments by
 growing them from none until the calls change them no more (a path that
 never returns does not count).
+
+With a `try` (§ 7.9): a variable assigned in its statements is assigned
+in a handler, and in the `finally`, only if it was assigned before the
+`try`; after the `try`, it is assigned if it is on every path that gets
+there, handlers included; a variable the `finally` assigns is assigned
+after the `try`, since every path goes through it.
 
 ## 6. Expressions
 
@@ -1077,8 +1123,9 @@ An **aggregate** writes a whole record or array value between braces.
   aggregate, then the value is copied.
 - **Computed bounds** (`var a: array[Int32 range 1..n] of Int32 := {1, 2,
   else 0}`): the positional form without `else` has `length(a)`
-  elements, and with `else` at most that many; otherwise it is a range
-  error at run time. The form by index without `else` names exactly the
+  elements, and with `else` at most that many; otherwise it is a length
+  error at run time (`LengthError`, as an assignment of arrays of
+  different lengths, § 7.1). The form by index without `else` names exactly the
   indices from `low(a)` to `high(a)` (range error otherwise); with
   `else`, an index named outside the bounds is an index error.
 - **An open-array parameter** (`array[I range <>] of T`, § 3.7.1)
@@ -1094,9 +1141,8 @@ An **aggregate** writes a whole record or array value between braces.
     type has a single value (an enumeration of one value), it is a
     compile-time error;
   - `else` is an error in both forms: there are no bounds to fill.
-- `p^ := {...}` assigns a record or an array with fixed bounds; for a
-  pointer to an open array it is an error, as every whole assignment of
-  `p^` (§ 3.10).
+- `p^ := {...}` assigns a record or an array with fixed bounds, and an
+  array made by `new` with the length check of § 7.1.
 - An aggregate may be an operand of `=` and `<>`, typed by the other
   operand (§ 6.2): `if v = {x: 0.0; y: 0.0; z: 0.0} then`.
 
@@ -1179,6 +1225,18 @@ P(a, b);                          // call: always with parentheses, even empty
 (§ 6.2) and lie in its range. An aggregate is computed whole before the
 target receives it (§ 6.8).
 
+**Arrays whose length is known at run time**: an open-array parameter
+with `var` or `out`, an array with computed bounds, `p^` of an array made
+by `new`. The value is any array the open parameter of that element and
+index would take (the rule of the comparison, § 6.2), an aggregate (§ 6.8)
+or a call. The lengths must be equal, index by index for an array of more
+indices, else it is a **length error** (`LengthError`, as Ada's length
+check), and a compile-time error when both lengths are known and differ;
+the elements go in order (the first to the first, whatever the bounds,
+as Ada's sliding). The value is read whole before the target is written:
+`a := a`, or two names of the same memory, are copies. An `out` open
+parameter assigned whole is assigned.
+
 ### 7.2 `if`
 
 `if`, any number of `elsif` branches, an optional `else`, then `end`.
@@ -1238,12 +1296,79 @@ a statement.
 A routine is called by its name, or through a value of a procedural type
 (§ 3.15): `cmp(a, b)`, `actions[i](n)`. The arguments of a call through
 a value go by position only (§ 8.7); the value is evaluated first, and a
-`nil` value stops the program before the arguments are evaluated.
+`nil` value raises `NilError` before the arguments are evaluated.
 
 ### 7.8 Declarations and pragmas as statements
 
 `var` and `const` statements are described in § 5.2; `pragma` statements
 in § 10.3.
+
+### 7.9 Exceptions: `raise` and `try`
+
+```pascal
+function Digit(c: Char): Int32;
+begin
+  if c < '0' or c > '9' then
+    raise BadDigit with "not a digit: " & c;
+  end;
+  return Int32(ord(c) - ord('0'));
+end Digit;
+
+begin
+  try
+    writeln(Digit(ch));
+  except
+    when RangeError, IndexError:
+      writeln("out of range");
+    when ParseError var e:
+      writeln(e.message, " at ", e.position);
+      raise;
+  finally
+    writeln("done");
+  end;
+end Prog.
+```
+
+- **`raise E with m`** raises the exception `E` (§ 3.16) with the message
+  `m`, an expression of type `String`; without `with` the message is
+  empty, except for a predefined exception, whose message is then the
+  text of its run-time error (§ 10.1): `raise IndexError` reads as an
+  index out of range. A program may raise every exception, the
+  predefined ones and their families included; `raise StorageError` (or
+  a child) stops the program, as running out of memory does.
+- **`raise;`** raises again the occurrence of the handler it is in; it is
+  allowed only inside a branch of `except` (not in a routine called from
+  there).
+- **`try`** runs its statements; then `except` with branches `when`, and
+  `else`, then `finally`: at least one of the two, and an `except` has a
+  branch or an `else`. An exception raised in the statements, also in a
+  routine they call, is taken by the first branch, in order, that names
+  it or its family; `when var e:` (the last branch, not together with
+  `else`) and `else` take every exception that no branch before takes
+  (never `StorageError`, § 10.1), the first naming the occurrence. A
+  branch that can never be reached (a family before its child, the same
+  exception twice, a family and its child in one branch) is a
+  compile-time error, and so is `when StorageError:`.
+- A branch **names the occurrence** with `var`: `when ParseError var
+  e:`, also with more exceptions (`when A, B var e:`); `e` is read only,
+  by `e.message`, `e.position`, `e.name` (§ 3.16).
+- When no branch takes the exception, it goes on to the `try` around,
+  then to the caller, up to the program: there it stops it (§ 10.1).
+- **`finally`** runs when the `try` is left, in every way: at the end,
+  by an exception (taken or not, except `StorageError`), by `return`,
+  `exit` or `continue`; an exception that leaves a branch of `except`
+  runs the `finally` of the same `try` first. `return`, `exit` and
+  `continue` that would leave a `finally` are compile-time errors (those
+  of a loop wholly inside it are allowed). An exception that leaves a
+  `finally` **replaces** the one in progress, which is lost.
+- In a function, `return e` inside a `try` evaluates `e` before the
+  `finally`; if the `finally` raises, the result is lost.
+- **State**: what was done before the exception stays, in the order of
+  evaluation (§ 6.7). A scalar `out` parameter does not go back when its
+  routine is left by an exception; a record or an array `out` keeps what
+  the routine wrote (§ 8.1).
+- `halt` (§ 9.8) inside a `try` ends the program at once: no handler, no
+  `finally`.
 
 ## 8. Routines
 
@@ -1276,7 +1401,8 @@ end;
 
 - A scalar `out` parameter is passed **by copy on return** (copy-out), as
   in Ada: the routine works on its own copy, which goes back to the
-  argument at each `return` and at the end, not before. Reading it before
+  argument at each `return` and at the end, not before, and not when the
+  routine is left by an exception (§ 7.9). Reading it before
   assigning it, or leaving the routine on a path that did not assign it,
   is a compile-time error.
 - A record or array `out` parameter is passed by address and is not
@@ -1356,6 +1482,11 @@ function sqrtf(x: CFloat): CFloat;
 - In place of its body, `external "library" [name "symbol"];`. Without
   `name`, the symbol is the name of the routine **as written** (C tells
   the case apart). `name` here is not a keyword.
+- In the units of the **standard library** only, `external "runtime"
+  name "symbol"` declares a function of the runtime of the
+  implementation, not of C: the library's own boundary with the runtime
+  (its files, its mathematics). It is no external routine for the rules
+  of this section and of § 10.4; elsewhere it is a compile-time error.
 - The library is a **logical name**: `"gmp"`, `"m"`; `"c"` is the C
   library of the process. The engine turns it into the file of the
   platform (`libgmp.so`, `gmp.dll`, `libgmp.dylib`) and looks for it
@@ -1643,8 +1774,8 @@ anything is read.
   `false`, or `readbytes` fewer bytes than asked, every later `readline`
   returns `false` and every later `readbytes` 0, even if a terminal
   gives more.
-- An error in reading, which is not the end, is a run-time error
-  (§ 10.1).
+- An error in reading, which is not the end, raises
+  `InputOutputError` at the read (§ 10.1).
 
 ### 9.3 Characters
 
@@ -1851,73 +1982,90 @@ As Ada's `Interfaces.C.Strings`, with explicit conversions:
 ### 10.1 Run-time errors
 
 The run-time checks are: overflow, index, range, `nil`, division by zero,
-conversion out of range, shift count, and dangling pointer. A failed check stops the
-program with a message on the standard error that says which check
-failed and where:
+conversion out of range, shift count, dangling pointer, and the length of
+arrays assigned whole (§ 7.1). A failed check **raises** the exception of
+the check (§ 3.16, § 7.9). An exception that no handler takes stops the
+program with a message on the standard error that says which exception,
+its message and where it was raised, and with **exit status 1**:
 
 ```
-luxia: index out of range at prog.luxia:12:5
+luxia: IndexError: index out of range at prog.luxia:12:5
+luxia: ParseError: not a digit: x at prog.luxia:7:5
+luxia: ParseError at prog.luxia:7:5
 ```
 
-and with **exit status 1**, the same for every error. Luxia 0 has no
-handlers: every run-time error stops the program.
+The message of a run-time error is the text of the table below; an
+exception raised with an empty message has no `: message` part, and one
+without a place no ` at ...` part. Before the message, every `finally`
+the exception leaves runs (§ 7.9); after it, the output and the files
+still open are written out and closed; an error in writing them then
+adds no second message.
 
 When the program cannot get the memory it asks for (`new`, a string, a
-`BigInt`, a computed array), it stops in the same way with the message "out of
-memory" and exit status 1 (as Ada's `Storage_Error`). How much memory a
-program may use depends on the implementation, and so does how much of
-it the local variables of calls take (an optimiser may put a routine's
-body in its caller); going past it is always this error, never a
-crash. A computation whose result is not used may be left out, and with
-it the memory it would take; a check is never left out. This is not a check: it cannot be
-suppressed.
+`BigInt`, a computed array), it raises `StorageError` with the message
+"out of memory" (as Ada's `Storage_Error`). How much memory a program
+may use depends on the implementation, and so does how much of it the
+local variables of calls take (an optimiser may put a routine's body in
+its caller); going past it is always this error, never a crash. A
+computation whose result is not used may be left out, and with it the
+memory it would take; a check is never left out. This is not a check: it
+cannot be suppressed.
 
 The same holds for calls nested too deeply, recursion without end for
-example: the program stops with "stack overflow" (Ada's `Storage_Error`
-too). How deep calls may go depends on the implementation; going past it
-is always this error, never a crash. A second `dispose` of the same
-object stops the program with "invalid dispose" (§ 9.7), which is not a
-check either.
+example: "stack overflow", a `StorageError` too. How deep calls may go
+depends on the implementation; going past it is always this error, never
+a crash. **No handler takes a `StorageError`**: `when StorageError:` is a
+compile-time error, `else` and `when var e:` do not take it, no `finally`
+runs, and the program stops with the message and exit status 1; these
+are the only outcomes that may depend on the engine. A second `dispose`
+of the same object raises `ProgramError` with "invalid dispose" (§ 9.7),
+which is not a check either.
 
-An error in reading the standard input or in writing the standard output
-(a device error, a full disk; the end of the input is no error) stops the
-program in the same way with "input/output error" and exit status 1, as
-Ada's `Device_Error`: it is never ignored, and it is not a check either.
-A read error is reported where the read is. The output may be buffered,
-so a write error may be found after the write that caused it, at a later
-output or at the end of the program: it is **always reported without a
-place**:
+An error in reading the standard input (a device error; the end of the
+input is no error) raises `InputOutputError` at the read, as Ada's
+`Device_Error`. An error in writing the standard output (a full disk) is
+never ignored, but **no handler takes it**: the output may be buffered,
+so it may be found after the write that caused it, at a later output or
+at the end of the program, and where depends on the engine. It stops the
+program with exit status 1 and is **always reported without a place**:
 
 ```
-luxia: input/output error
+luxia: InputOutputError: input/output error
 ```
 
 When the reader of the output has gone (a pipe whose reader ended, as in
 `prog | head`), the program stops where it finds it, without a message,
 with **exit status 141**, the status a Unix shell shows for a program
 ended by a closed pipe: nothing it writes can be read any more, and the
-status says why it stopped.
+status says why it stopped. `halt` (§ 9.8) and this end are not
+exceptions.
 
-As in Ada, a program sees no error codes. Internally each check has a
-code, listed here for reference:
+As in Ada, a program sees no error codes, only the exceptions. Each
+check has an internal code, listed here for reference:
 
-| Code | Message | Check name (§ 10.3) |
-|---|---|---|
-| 6 | overflow | `overflow_check` |
-| 7 | out of memory | — |
-| 11 | division by zero | `division_check` |
-| 28 | stack overflow | — |
-| 100 | index out of range | `index_check` |
-| 101 | value out of range | `range_check` |
-| 102 | nil dereferenced | `nil_check` |
-| 103 | conversion out of range | `conversion_check` |
-| 104 | shift count out of range | `shift_check` |
-| 105 | dangling pointer | `dangling_check` |
-| 106 | invalid dispose | — |
-| 107 | input/output error | — |
+| Code | Exception | Message | Check name (§ 10.3) |
+|---|---|---|---|
+| 6 | `OverflowError` | overflow | `overflow_check` |
+| 7 | `StorageError` | out of memory | — |
+| 11 | `DivisionError` | division by zero | `division_check` |
+| 28 | `StorageError` | stack overflow | — |
+| 100 | `IndexError` | index out of range | `index_check` |
+| 101 | `RangeError` | value out of range | `range_check` |
+| 102 | `NilError` | nil dereferenced | `nil_check` |
+| 103 | `ConversionError` | conversion out of range | `conversion_check` |
+| 104 | `ShiftError` | shift count out of range | `shift_check` |
+| 105 | `DanglingError` | dangling pointer | `dangling_check` |
+| 106 | `ProgramError` | invalid dispose | — |
+| 107 | `InputOutputError` | input/output error | — |
+| 108 | `LengthError` | length mismatch | `range_check` |
+| 109 | `ProgramError` | invalid file handle | — |
+
+The families are `ConstraintError` (6, 11, 100-105, 108),
+`StorageError` (7, 28), `ProgramError` (106, 109) and
+`InputOutputError` (107).
 
 `range_check` includes the validity checks on components without a
-value (§ 3.11).
+value (§ 3.11) and the length checks of § 7.1.
 
 ### 10.2 Checks are on by default
 
@@ -1994,8 +2142,18 @@ that leads to an external routine of the library is a compile-time
 error that shows the chain of calls. The chain also passes through the
 calls through a value of a procedural type, which reach the routines of
 § 11.5. The routines of the language
-(§ 9) are not external. A program that compiles so has no unchecked
-boundary.
+(§ 9) are not external, nor are the functions of the runtime that the
+library declares with `external "runtime"` (§ 8.5). A program that
+compiles so has no unchecked boundary.
+
+**No handlers.** `pragma restrictions(no_handlers)`, among the
+declarations of the program (or `luxia --restrict=no_handlers`), makes
+`try` a compile-time error in the program and in its units, as Ada's
+`No_Exception_Handlers`: every exception stops the program, and the code
+has no exceptional paths. The standard library may use `try`, but a
+program under the restriction may **reach** no routine of the library
+that contains one: the same chain of calls as for `no_external`, shown
+in the error.
 
 ## 11. Program structure and units
 
@@ -2230,7 +2388,7 @@ end.
   libraries (§ 8.5).
 - A unit not found is a compile-time error on the `uses`.
 - A run-time error in a unit names the file of the unit:
-  `luxia: index out of range at geometry.luxia:12:5`.
+  `luxia: IndexError: index out of range at geometry.luxia:12:5`.
 
 ### 11.5 Initialisation
 
@@ -2238,8 +2396,10 @@ end.
   **initialisation**. The variables of the unit take their initial
   values first, in the order they are written; then the `begin ... end`
   runs. In it the rules of the body of a program hold, except that
-  `return;` is a compile-time error; `halt` ends the program, and a
-  run-time error stops it as anywhere.
+  `return;` is a compile-time error; `halt` ends the program, and an
+  exception that no handler there takes stops it before the body of the
+  program, after the `finally` it leaves; the units not yet initialised
+  stay so.
 - Every unit is initialised **once, before the body of the program**.
   The order is computed by the compiler from what the initialisations
   can do, without pragmas:
@@ -2326,7 +2486,8 @@ Type       = QualIdent [ "range" ( Range | "<>" ) ]
            | "record" { IdentList ":" Type ";" } "end"
            | "^" Type
            | "procedure" Params
-           | "function" Params ":" Type .
+           | "function" Params ":" Type
+           | "exception" [ "(" QualIdent ")" ] .
 Range      = Simple ".." Simple .
 Stmts      = { Stmt ";" } .
 Stmt       = ( Designator [ ":=" Expr ]
@@ -2342,9 +2503,14 @@ Stmt       = ( Designator [ ":=" Expr ]
              | "exit" [ "when" Expr ]
              | "continue" [ "when" Expr ]
              | "return" [ Expr ]
+             | "try" Stmts [ "except" { Handler } [ "else" Stmts ] ]
+               [ "finally" Stmts ] "end"
+             | "raise" [ QualIdent [ ident Expr ] ]
              | "var" VarDecl
              | "const" ConstDecl
              | Pragma ) .
+Handler    = "when" ( QualIdent { "," QualIdent } [ "var" ident ]
+                    | "var" ident ) ":" Stmts .
 Label      = Simple [ ".." Simple ] .
 Expr       = Relation [ "and" Relation { "and" Relation }
                       | "or" Relation { "or" Relation }
@@ -2373,10 +2539,13 @@ to give better messages: a function call used as a statement, a
 designator that is not a call used as a statement, `x:w:d` outside
 `write`/`writeln`, a routine inside a nested routine, an external or an
 operator nested in a routine (§ 8.9), a procedural type outside a `type`
-declaration and a default value in it (§ 3.15), and a field or an index
-after `^` (`p^.x`, `p^[i]`: § 3.10). In an external
+declaration and a default value in it (§ 3.15), an `exception` type
+outside a `type` declaration of a file (§ 3.16), a `try` without a
+handler, an `except` without a branch and without `else` (§ 7.9), and a
+field or an index after `^` (`p^.x`, `p^[i]`: § 3.10). In an external
 routine, the `ident` before the second `string` must be `name`, a
-contextual word with that meaning only there, not a keyword.
+contextual word with that meaning only there, not a keyword; in `raise`,
+the `ident` before the message must be `with`, the same way.
 
 A qualified name `Geometry.Distance` is a `Designator` in expressions
 and a `QualIdent` in types and pragmas; the semantic analysis tells a
@@ -2402,13 +2571,12 @@ the two uses of `when` do not conflict.
 The following are not part of Luxia 0; they are listed so that programs
 and tools can anticipate them.
 
-- Exceptions and handlers (`raise`, `try ... except`), grouping the
-  run-time checks as Ada's `Constraint_Error` does.
+- Exceptions with data of their own; an occurrence kept outside its
+  handler (Ada's `Save_Occurrence`).
 - An order (`<`) on arrays of discrete elements, as in Ada.
 - Sets; the brackets of Pascal (`[a, b]`) remain free for them.
 - An aggregate as the initial value of an array of more indices with
   computed bounds.
-- Assignment of whole open arrays, with a length check.
 - Iteration over the Unicode characters of a string.
 - Redefinition of the names of the predefined library beyond `str`.
 - Types for hardware: bit layout of records, byte order, alignment,
