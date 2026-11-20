@@ -48,6 +48,7 @@ void limba_types_init(limba_types *ts)
     ts->t[ts->char_].hi = 0x10ffff;
     ts->string = add(ts, LIMBA_LTK_STRING, 0, PTR_SIZE, PTR_SIZE);
     ts->bigint = add(ts, LIMBA_LTK_BIGINT, LIMBA_TF_SIGNED, PTR_SIZE, PTR_SIZE);
+    ts->occurrence = add(ts, LIMBA_LTK_OCCURRENCE, 0, 0, 1);
 }
 
 void limba_types_free(limba_types *ts)
@@ -190,6 +191,15 @@ limba_ltype limba_types_proc(limba_types *ts, const limba_param *params,
     limba_ltype id = limba_types_routine(ts, params, n, result);
     ts->t[id].kind = LIMBA_LTK_PROC;
     return id;
+}
+
+limba_ltype limba_types_exception(limba_types *ts, int64_t id,
+                                  limba_ltype parent)
+{
+    limba_ltype e = add(ts, LIMBA_LTK_EXCEPTION, 0, 0, 1);
+    ts->t[e].elem = parent;
+    ts->t[e].lo = id;
+    return e;
 }
 
 limba_ltype limba_types_record_begin(limba_types *ts)
@@ -352,6 +362,10 @@ static size_t show(const limba_types *ts, limba_ltype id, limba_name_fn name,
         return put(buf, size, len, "an integer of any size", 22);
     case LIMBA_LTK_OPAQUE:
         return put(buf, size, len, "an opaque pointer", 17);
+    case LIMBA_LTK_EXCEPTION:
+        return put(buf, size, len, "an exception", 12);
+    case LIMBA_LTK_OCCURRENCE:
+        return put(buf, size, len, "an occurrence", 13);
     }
     if (t->flags & LIMBA_TF_RANGE) {
         len = show(ts, t->base, name, ctx, buf, size, len, depth + 1);

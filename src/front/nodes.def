@@ -41,6 +41,8 @@ LX_NODE(FIELD, "field", "ln--")      /* names, type */
 LX_NODE(TPTR, "tptr", "n---")
 LX_NODE(TPROC, "tproc", "lq--")     /* op: procedure or function; the
                                        parameters, the result (0: none) */
+LX_NODE(TEXC, "texc", "q---")       /* exception [(P)]: the parent, a TNAME
+                                       (0: none) (§ 3.16) */
 /* statements */
 LX_NODE(ASSIGN, "assign", "nn--")
 LX_NODE(CALLST, "callst", "n---")    /* a CALL used as a statement */
@@ -58,6 +60,13 @@ LX_NODE(LOOP, "loop", "l---")
 LX_NODE(EXIT, "exit", "n---")        /* condition */
 LX_NODE(CONTINUE, "continue", "n---")
 LX_NODE(RETURN, "return", "n---")
+LX_NODE(TRY, "try", "lqqq")          /* statements, HANDLER nodes (0: no
+                                        except), else, finally (0: none) */
+LX_NODE(HANDLER, "handler", "nnl-")  /* when: TNAME nodes (0: when var e),
+                                        the occurrence (NAME, 0: none),
+                                        statements */
+LX_NODE(RAISE, "raise", "nn--")      /* the exception, a TNAME (0: raise;),
+                                        the message (0: none) */
 /* expressions */
 LX_NODE(INT, "int", "I---")
 LX_NODE(REAL, "real", "R---")

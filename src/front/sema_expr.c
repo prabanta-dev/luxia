@@ -729,6 +729,12 @@ static limba_ltype ref_sym(limba_lxs *S, uint32_t node, limba_sym s)
         S->val[node] = y->value;
         return set(S, node, y->type);
     case LIMBA_LSYM_VAR:
+        if (y->type == S->ts.occurrence) {
+            lxs_error(S, LXE_OCCURRENCE, node,
+                      "an occurrence is read only by its message, position "
+                      "and name: e.message");
+            return set(S, node, 0);
+        }
         lxs_use(S, s, node, false);
         lxs_capture(S, s, node, false);
         return set(S, node, y->type);
@@ -775,6 +781,13 @@ static limba_ltype select_expr(limba_lxs *S, uint32_t node, uint32_t scope)
 {
     limba_lx_node *x = lxs_node(S, node);
     uint32_t base = x->a, fname = x->b;
+    if (lxs_node(S, base)->kind == LXN_REF) {
+        /* e.message of an occurrence (§ 3.16) */
+        limba_sym s = lxs_peek(S, scope, base);
+        if (s && S->st.sym[s].kind == LIMBA_LSYM_VAR &&
+            S->st.sym[s].type == S->ts.occurrence)
+            return lxs_exc_component(S, node, s);
+    }
     base = no_deref(S, node, base, true);
     limba_ltype t = through_pointer(S, lxs_expr(S, base, scope, 0));
     if (!t)
@@ -2514,6 +2527,13 @@ bool lxs_writable(limba_lxs *S, uint32_t node, bool report)
         if (!s)
             return true; /* reported */
         limba_symbol *y = &S->st.sym[s];
+        if (y->kind == LIMBA_LSYM_VAR && y->type == S->ts.occurrence) {
+            /* e alone is reported where it is read */
+            if (report && S->type[node] == S->ts.occurrence)
+                lxs_error(S, LXE_OCCURRENCE, node,
+                          "an occurrence is read only");
+            return S->type[node] != S->ts.occurrence;
+        }
         if (y->kind == LIMBA_LSYM_VAR && !(y->flags & LXS_LOOPVAR)) {
             /* a variable of an interface is read-only outside its unit
                (§ 11.3) */

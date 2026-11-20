@@ -504,6 +504,8 @@ static int compile(const char *path, const char *text, size_t len,
         if (platform >= 0)
             sema.target = (unsigned)platform;
         sema.no_external = o->no_external;
+        if (o->no_handlers)
+            sema.no_handlers = true;
         limba_lxs_check(&sema);
         checked = true;
     }

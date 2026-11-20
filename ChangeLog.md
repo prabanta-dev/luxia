@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Exceptions (step 4 of Luxia 1, stage 3): `type E = exception(P)`,
+  `raise E with m`, `raise;`, `try` with branches `when A, B var e:`,
+  `when var e:`, `else` and `finally`; the occurrence `e.message`,
+  `e.position`, `e.name` (qualified by its unit); `pragma
+  restrictions(no_handlers)` and `luxia --restrict=no_handlers`, also
+  through the calls into the library; diagnostics L0107-L0112. In the IR
+  a branch is a switch on the identity, a `finally` is copied on every
+  way out and a pad runs it before raising again; a variable assigned in
+  a `try` and read after it lives in a slot, its definite assignment
+  followed. Programs without `try` give the same IR as before. Next: an
+  array with computed bounds is not yet freed when an exception leaves
+  its statements; that comes with the following work (decided).
 - An error at run time no handler takes is reported with the name of its
   exception: `luxia: IndexError: index out of range at prog.luxia:12:5`.
   Every module carries the table of the predefined exceptions.

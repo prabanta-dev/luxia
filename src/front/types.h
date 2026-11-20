@@ -37,11 +37,15 @@ enum {
     LIMBA_LTK_UINT,  /* an integer constant not typed yet */
     LIMBA_LTK_UREAL, /* a real constant not typed yet */
     LIMBA_LTK_NIL,
-    LIMBA_LTK_BIGINT, /* an integer of any size: a counted handle, not
-                         discrete */
-    LIMBA_LTK_OPAQUE, /* an address of memory of C, never dereferenced */
-    LIMBA_LTK_PROC,   /* a procedural type: the address of a routine, or
-                         nil; distinct by declaration */
+    LIMBA_LTK_BIGINT,     /* an integer of any size: a counted handle, not
+                             discrete */
+    LIMBA_LTK_OPAQUE,     /* an address of memory of C, never dereferenced */
+    LIMBA_LTK_PROC,       /* a procedural type: the address of a routine, or
+                             nil; distinct by declaration */
+    LIMBA_LTK_EXCEPTION,  /* an identity with a name, no type of values:
+                             elem its parent (0: none), lo its identity */
+    LIMBA_LTK_OCCURRENCE, /* what a branch of except names: read only by
+                             its components */
 };
 
 #define LIMBA_TF_SIGNED 1u
@@ -91,6 +95,7 @@ typedef struct {
     limba_param *param;
     uint32_t nparam, capparam;
     limba_ltype void_, uint, ureal, nil, bool_, char_, string, bigint;
+    limba_ltype occurrence;
     uint32_t ptr_size; /* bytes of a pointer, String, BigInt: the module's
                           ptr_bits / 8 */
 } limba_types;
@@ -136,6 +141,10 @@ void limba_types_record_field(limba_types *ts, limba_ltype r, uint32_t name,
                               limba_ltype type);
 /* false if the size overflows */
 bool limba_types_record_end(limba_types *ts, limba_ltype r);
+
+/* an exception of identity id, child of parent (0: none) */
+limba_ltype limba_types_exception(limba_types *ts, int64_t id,
+                                  limba_ltype parent);
 
 void limba_types_set_name(limba_types *ts, limba_ltype t, uint32_t name);
 

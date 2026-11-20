@@ -59,6 +59,7 @@ The numbers 0 to 3 are also the exit statuses of `luxia`.
 | `suppress` | checks off in the whole source, separated by commas | `--suppress` |
 | `target` | the platform the C types by name follow, `NULL` for the one that compiles | `--target` |
 | `no_external` | no boundary with C | `--restrict=no_external` |
+| `no_handlers` | no `try`, in the program nor in the library it reaches (§ 10.4) | `--restrict=no_handlers` |
 | `max_errors` | errors reported before giving up, 0 for 20 | |
 | `diag_out` | where the diagnostics are printed, as `luxia` prints them; `NULL` for nowhere | standard error |
 | `no_free` | leave the memory of the compilation unfreed, for a process that ends right after (freeing piece by piece costs 3 %) | always in a release build |

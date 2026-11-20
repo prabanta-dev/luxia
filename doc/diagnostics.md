@@ -2358,7 +2358,7 @@ program child of `StorageError` (§ 3.16, § 7.9).
 program p;
 begin
   try
-    writeln(1 div 0);
+    writeln(1);
   except
     when ConstraintError:
       writeln("constraint");
@@ -2369,7 +2369,7 @@ end.
 ```
 
 ```
-prog.luxia:7:10: error[L0108]: this branch is never reached: ConstraintError, a branch before it, takes DivisionError
+prog.luxia:8:10: error[L0108]: this branch is never reached: ConstraintError, a branch before it, takes DivisionError
 ```
 
 ### L0109 — RAISE OUT OF PLACE
@@ -2443,7 +2443,7 @@ an argument by address.
 program p;
 begin
   try
-    writeln(1 div 0);
+    writeln(1);
   except
     when DivisionError var e:
       writeln(e.code);

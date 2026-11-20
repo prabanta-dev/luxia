@@ -6,12 +6,15 @@
  */
 #include "parse.h"
 
+#include <string.h>
+
 /* the tokens that close a list of statements */
 static bool closes(unsigned k)
 {
     return k == LX_KW_END || k == LX_KW_ELSE || k == LX_KW_ELSIF ||
-           k == LX_KW_UNTIL || k == LX_KW_WHEN || k == LX_EOF ||
-           k == LX_KW_PROCEDURE || k == LX_KW_FUNCTION;
+           k == LX_KW_UNTIL || k == LX_KW_WHEN || k == LX_KW_EXCEPT ||
+           k == LX_KW_FINALLY || k == LX_EOF || k == LX_KW_PROCEDURE ||
+           k == LX_KW_FUNCTION;
 }
 
 static bool starts_stmt(unsigned k)
@@ -27,6 +30,8 @@ static bool starts_stmt(unsigned k)
     case LX_KW_EXIT:
     case LX_KW_CONTINUE:
     case LX_KW_RETURN:
+    case LX_KW_TRY:
+    case LX_KW_RAISE:
     case LX_KW_VAR:
     case LX_KW_CONST:
     case LX_KW_PRAGMA:
@@ -176,6 +181,79 @@ static uint32_t for_stmt(limba_lxp *P)
     return f;
 }
 
+/* when A, B var e: ... ; when var e: ... (§ 7.9) */
+static uint32_t handler(limba_lxp *P)
+{
+    limba_loc loc = lxp_loc(P);
+    limba_lxp_next(P); /* when */
+    uint32_t names = 0, occ = 0;
+    if (!limba_lxp_accept(P, LX_KW_VAR)) {
+        uint32_t mark = limba_lx_list_begin(P->t);
+        do
+            limba_lx_list_push(P->t, limba_lxp_qualident(P));
+        while (limba_lxp_accept(P, LX_COMMA));
+        names = limba_lx_list_end(P->t, mark, loc);
+        if (limba_lxp_accept(P, LX_KW_VAR))
+            occ = limba_lxp_name(P);
+    } else {
+        occ = limba_lxp_name(P);
+    }
+    limba_lxp_expect(P, LX_COLON, "after the exceptions of the branch");
+    uint32_t body = limba_lxp_stmts(P);
+    return lxp_node(P, LXN_HANDLER, loc, names, occ, body, 0);
+}
+
+static uint32_t try_stmt(limba_lxp *P)
+{
+    uint32_t opener = P->pos;
+    limba_loc loc = lxp_loc(P);
+    limba_lxp_next(P);
+    uint32_t body = limba_lxp_stmts(P), handlers = 0, other = 0, fin = 0;
+    bool except = false;
+    if (lxp_kind(P) == LX_KW_EXCEPT) {
+        limba_loc eloc = lxp_loc(P);
+        limba_lxp_next(P);
+        except = true;
+        uint32_t mark = limba_lx_list_begin(P->t);
+        while (lxp_kind(P) == LX_KW_WHEN)
+            limba_lx_list_push(P->t, handler(P));
+        handlers = limba_lx_list_end(P->t, mark, eloc);
+        if (limba_lxp_accept(P, LX_KW_ELSE))
+            other = limba_lxp_stmts(P);
+        else if (!P->t->node[handlers].b)
+            limba_lxp_expected(P, "a branch 'when' or 'else' after except");
+    }
+    if (limba_lxp_accept(P, LX_KW_FINALLY))
+        fin = limba_lxp_stmts(P);
+    else if (!except)
+        limba_lxp_expected(P, "'except' or 'finally'");
+    limba_lxp_end(P, opener);
+    return lxp_node(P, LXN_TRY, loc, body, handlers, other, fin);
+}
+
+/* raise; raise E; raise E with m (with: a word of its context) */
+static uint32_t raise_stmt(limba_lxp *P)
+{
+    limba_loc loc = lxp_loc(P);
+    limba_lxp_next(P);
+    uint32_t exc = 0, msg = 0;
+    if (lxp_kind(P) == LX_IDENT) {
+        exc = limba_lxp_qualident(P);
+        if (lxp_kind(P) == LX_IDENT) {
+            size_t n;
+            const char *w =
+                limba_strtab_get(P->lx->names, P->lx->tok[P->pos].val, &n);
+            if (n == 4 && !memcmp(w, "with", 4)) {
+                limba_lxp_next(P);
+                msg = limba_lxp_expr(P, LXP_EXPR);
+            } else {
+                limba_lxp_expected(P, "'with' or ';'");
+            }
+        }
+    }
+    return lxp_node(P, LXN_RAISE, loc, exc, msg, 0, 0);
+}
+
 /* an assignment or a call */
 static uint32_t simple_stmt(limba_lxp *P)
 {
@@ -223,6 +301,10 @@ static uint32_t stmt(limba_lxp *P)
         return lxp_node(P, LXN_REPEAT, loc, a, b, 0, 0);
     case LX_KW_FOR:
         return for_stmt(P);
+    case LX_KW_TRY:
+        return try_stmt(P);
+    case LX_KW_RAISE:
+        return raise_stmt(P);
     case LX_KW_LOOP:
         limba_lxp_next(P);
         a = limba_lxp_stmts(P);

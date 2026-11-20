@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+// An exception of a unit: its name qualified (§ 3.16), taken by the
+// program and in the initialisation, one of its implementation taken
+// by its family outside, and one no handler takes.
+program exc_units;
+uses Geo;
+begin
+  try
+    Find(2);
+  except
+    when Geo.NotFound var e:
+      writeln("prog ", e.name, " [", e.message, "]");
+  end;
+  Find(1);
+end exc_units.

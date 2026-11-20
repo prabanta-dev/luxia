@@ -1,0 +1,215 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+// Exceptions (specification § 3.16, § 7.9, § 10.1): raise, try with
+// branches, else and finally on every way out, the occurrence, definite
+// assignment through handlers, an exception that leaves a finally, and
+// one no handler takes at the end.
+program exceptions;
+type
+  Fail = exception;
+  Other = exception(ConstraintError);
+
+function F(k: Int32): Int32;
+var r: Int32 := 0;
+begin
+  try
+    r := 1;
+    if k = 1 then
+      return 10;
+    end;
+    if k = 2 then
+      raise Fail with "two";
+    end;
+    r := 2;
+  finally
+    writeln("F finally ", k, " ", r);
+  end;
+  return r;
+end F;
+
+procedure Loops();
+var total: Int32 := 0;
+begin
+  for var i: Int32 := 1 to 5 do
+    try
+      if i = 2 then
+        continue;
+      end;
+      if i = 4 then
+        exit;
+      end;
+      total := total + i;
+    finally
+      writeln("loop finally ", i);
+    end;
+  end;
+  writeln("total ", total);
+end Loops;
+
+procedure SetOut(out x: Int32);
+begin
+  x := 1;
+  try
+    x := 2;
+    raise Fail;
+  except
+    when Fail:
+      writeln("SetOut sees ", x);
+  end;
+end SetOut;
+
+procedure Nested();
+var n: Int32 := 0;
+  procedure Bump();
+  begin
+    n := n + 1;
+    try
+      if n = 2 then
+        raise Other with "inner";
+      end;
+    except
+      when ConstraintError var e:
+        writeln("Bump ", e.name, " ", e.message);
+        raise;
+    end;
+  end Bump;
+begin
+  try
+    Bump();
+    Bump();
+  except
+    when Other var e:
+      writeln("Nested ", e.name, " ", n);
+  end;
+end Nested;
+
+procedure Replace();
+begin
+  try
+    try
+      raise Fail with "first";
+    finally
+      raise Other with "second";
+    end;
+  except
+    when var e:
+      writeln("replaced by ", e.name, " ", e.message);
+  end;
+end Replace;
+
+var y: Int32;
+var s: String := "";
+type
+  Node = record v: Int32; end;
+var k: Int32 := 3;
+
+procedure SetOut2(out x: Int32; bad: Boolean);
+begin
+  x := 7;
+  if bad then raise Fail with "fail"; end;
+end SetOut2;
+
+procedure Outer();
+var s: String := "start";
+var n: Int32 := 0;
+  procedure Inner(m: Int32);
+  begin
+    try
+      n := n + m;
+      s := s & "+";
+      if n > 2 then raise Fail with s; end;
+    finally
+      writeln("inner finally ", n);
+    end;
+  end Inner;
+begin
+  try
+    Inner(1);
+    Inner(2);
+  except
+    when Fail var e:
+      writeln("outer caught ", e.message, " ", s, " ", n);
+  end;
+end Outer;
+
+var y1: Int32 := 1;
+var t: String := "";
+var p: ^Node;
+begin
+  writeln(F(0));
+  writeln(F(1));
+  try
+    writeln(F(2));
+  except
+    when Fail var e:
+      writeln("caught ", e.message, " ", e.position);
+  end;
+  Loops();
+  SetOut(y);
+  writeln("y ", y);
+  Nested();
+  Replace();
+  try
+    s := "a";
+    var a: array[Int32 range 1..3] of Int32 := {1, 2, 3};
+    var i: Int32 := 4;
+    s := s & "b";
+    writeln(a[i]);
+  except
+    else
+      writeln("else ", s);
+  end;
+  try
+    writeln("in");
+  finally
+    writeln("fin");
+  end;
+  SetOut2(y1, false);
+  writeln("y ", y1);
+  y1 := 1;
+  try
+    SetOut2(y1, true);
+  except
+    when Fail:
+      writeln("y kept ", y1);
+  end;
+  Outer();
+  try
+    t := "abc";
+    t := t & "def";
+    raise IndexError;
+  except
+    when ConstraintError var e:
+      writeln(e.name, ": ", e.message, " ", t);
+  end;
+  try
+    p := new(Node);
+    dispose(p);
+    dispose(p);
+  except
+    when ProgramError var e:
+      writeln(e.name, ": ", e.message);
+  end;
+  try
+    try
+      raise Fail with "a";
+    except
+      when Fail:
+        try
+          raise;
+        finally
+          writeln("rethrow finally");
+        end;
+    end;
+  except
+    else
+      writeln("outer else");
+  end;
+  try
+    writeln("before");
+    k := k - 3;
+    writeln(10 div k);
+  finally
+    writeln("last finally");
+  end;
+end exceptions.

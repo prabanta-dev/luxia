@@ -674,8 +674,7 @@ static void builtin(lxl *L, uint32_t node, unsigned id, limba_id *result)
             limba_id tmpb = lxl_temp(L, xt, node);
             uint32_t ab[2] = {lxl_value(L, a0), tmpb};
             limba_id okb = lxl_rt(L, LIMBA_RT_STR_TO_BIG, LIMBA_T_I1, ab, 2);
-            limba_id yes = limba_ssa_block(L->ssa),
-                     done = limba_ssa_block(L->ssa);
+            limba_id yes = lxl_block(L), done = lxl_block(L);
             limba_ssa_cbr(L->ssa, L->cur, okb, yes, done);
             limba_ssa_seal(L->ssa, yes);
             L->cur = yes;
@@ -700,7 +699,7 @@ static void builtin(lxl *L, uint32_t node, unsigned id, limba_id *result)
                                                 : LIMBA_RT_STR_TO_U64;
         limba_id ok = lxl_rt(L, rt, LIMBA_T_I1, a, real ? 2 : 4);
         /* the variable changes only when the text is a number */
-        limba_id yes = limba_ssa_block(L->ssa), done = limba_ssa_block(L->ssa);
+        limba_id yes = lxl_block(L), done = lxl_block(L);
         limba_ssa_cbr(L->ssa, L->cur, ok, yes, done);
         limba_ssa_seal(L->ssa, yes);
         L->cur = yes;
@@ -942,8 +941,8 @@ static void builtin(lxl *L, uint32_t node, unsigned id, limba_id *result)
         }
         /* its Strings released first, but only in a live object: a
            second dispose is still the error of mem_free */
-        limba_id check = limba_ssa_block(L->ssa), rel = limba_ssa_block(L->ssa),
-                 fr = limba_ssa_block(L->ssa), done = limba_ssa_block(L->ssa);
+        limba_id check = lxl_block(L), rel = lxl_block(L), fr = lxl_block(L),
+                 done = lxl_block(L);
         limba_id null =
             lxl_emit(L, LIMBA_OP_NULLV, LIMBA_T_PTR, 0, 0, 0, NULL, 0);
         limba_ssa_cbr(L->ssa, L->cur, icmp(L, LIMBA_CC_NE, v, null), check,
@@ -1019,7 +1018,7 @@ static void builtin(lxl *L, uint32_t node, unsigned id, limba_id *result)
         lxl_rt(L, LIMBA_RT_HALT, LIMBA_T_VOID, &v, 1);
         limba_ssa_unreachable(L->ssa, L->cur);
         {
-            limba_id after = limba_ssa_block(L->ssa);
+            limba_id after = lxl_block(L);
             limba_ssa_seal(L->ssa, after);
             L->cur = after;
         }

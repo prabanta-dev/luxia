@@ -160,3 +160,16 @@ LX_ERROR(105, PROFILE)          /* a routine or a value of another profile
                                    than the procedural type */
 LX_ERROR(106, PROC_TYPE_FORM)   /* a procedural type without a name, or with
                                    a default value */
+/* exceptions (Luxia 1, step 4) */
+LX_ERROR(107, EXCEPTION_PLACE)  /* an exception inside a routine, as a type
+                                   of values, with a parent that is not
+                                   one, parents in a circle */
+LX_ERROR(108, HANDLER)          /* a branch never reached, when
+                                   StorageError, when var e not last; a
+                                   child of StorageError */
+LX_ERROR(109, RAISE_PLACE)      /* raise; outside a branch of except */
+LX_ERROR(110, FINALLY_JUMP)     /* return, exit, continue leaving a
+                                   finally */
+LX_ERROR(111, NO_HANDLERS)      /* try under restrictions(no_handlers) */
+LX_ERROR(112, OCCURRENCE)       /* the occurrence used other than by
+                                   message, position, name */

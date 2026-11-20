@@ -128,6 +128,8 @@ typedef struct {
     uint32_t intf, impl;  /* its scopes; the program has only impl */
     bool library;         /* a unit of the standard library */
     bool restricted;      /* its own pragma restrictions(no_external) */
+    bool no_handlers;     /* its own pragma restrictions(no_handlers) */
+    uint32_t try_node;    /* a try of its initialisation, 0 if none */
     uint32_t order;       /* its place in the initialisation, from 0 */
     bool uses;            /* it uses some unit: names may come from them */
 } limba_lxs_unit;
@@ -313,6 +315,20 @@ typedef struct {
     limba_sym nest;
     limba_lxs_capture *caps;
     uint32_t ncaps, capcaps;
+    /* exceptions (§ 3.16, § 7.9): StorageError, which no handler takes;
+       the exceptions of the program declared so far (their identities
+       from 1000); in the statements being checked, the branches of
+       except around (raise; is allowed), the finally around and the
+       loops there were where it began (exit and continue may not leave
+       it); no try in the program (pragma restrictions(no_handlers)) */
+    limba_ltype ty_storage;
+    uint32_t nexc;
+    unsigned branches, in_finally, fin_loops;
+    bool no_handlers;
+    /* per routine symbol of the library: a try in it, 0 if none (for
+       restrictions(no_handlers) through the calls) */
+    uint32_t *try_at;
+    uint32_t ntry_at;
 } limba_lxs;
 
 void limba_lxs_init(limba_lxs *S, limba_lx_ast *t, limba_lx *lx,
@@ -576,6 +592,20 @@ bool lxs_typed_const(limba_lxs *S, uint32_t d, limba_sym s, limba_ltype t);
 bool lxs_agg_ready(const limba_lxs *S, uint32_t node, limba_ltype t);
 /* a call as a statement: it must be a procedure */
 limba_ltype lxs_call_stmt(limba_lxs *S, uint32_t node, uint32_t scope);
+
+/* exceptions (sema_exc.c, § 3.16, § 7.9) */
+/* the type exception [(P)] at node, declared by self in scope */
+limba_ltype lxs_exc_type(limba_lxs *S, uint32_t node, uint32_t scope,
+                         unsigned where, limba_sym self);
+/* is exception t the exception f or one of its family */
+bool lxs_exc_within(const limba_lxs *S, limba_ltype t, limba_ltype f);
+void lxs_exc_try(limba_lxs *S, uint32_t node, uint32_t scope);
+void lxs_exc_raise(limba_lxs *S, uint32_t node, uint32_t scope);
+/* e.x of the occurrence s at SEL node: String for message, position and
+   name; 0 (reported) for anything else */
+limba_ltype lxs_exc_component(limba_lxs *S, uint32_t node, limba_sym s);
+/* is try forbidden where node is (§ 10.4) */
+bool lxs_no_handlers(const limba_lxs *S, uint32_t node);
 
 /* statements (sema_stmt.c) */
 void lxs_stmts(limba_lxs *S, uint32_t list, uint32_t scope);

@@ -270,10 +270,18 @@ static void stmt(limba_lxs *S, uint32_t node, uint32_t scope)
             lxs_error(S, LXE_OUTSIDE_LOOP, node,
                       "'%s' is allowed only inside a loop",
                       x->kind == LXN_EXIT ? "exit" : "continue");
+        else if (S->in_finally && S->loops == S->fin_loops)
+            lxs_error(S, LXE_FINALLY_JUMP, node,
+                      "%s would leave a finally: a finally runs to its end",
+                      x->kind == LXN_EXIT ? "exit" : "continue");
         if (x->a)
             condition(S, x->a, scope);
         break;
     case LXN_RETURN: {
+        if (S->in_finally)
+            lxs_error(S, LXE_FINALLY_JUMP, node,
+                      "return would leave a finally: a finally runs to its "
+                      "end");
         if (S->in_init) {
             lxs_error(S, LXE_INIT_RETURN, node,
                       "the initialisation of a unit has no return: it ends "
@@ -302,6 +310,12 @@ static void stmt(limba_lxs *S, uint32_t node, uint32_t scope)
         break;
     case LXN_PRAGMA:
         lxs_pragma(S, node);
+        break;
+    case LXN_TRY:
+        lxs_exc_try(S, node, scope);
+        break;
+    case LXN_RAISE:
+        lxs_exc_raise(S, node, scope);
         break;
     }
 }
@@ -410,5 +424,6 @@ void lxs_routine_body(limba_lxs *S, limba_sym routine)
     S->result = sig ? lxs_ty(S, sig)->elem : S->ts.void_;
     S->in_routine = true;
     S->loops = 0;
+    S->branches = S->in_finally = 0;
     lxs_stmts(S, stmts, scope);
 }

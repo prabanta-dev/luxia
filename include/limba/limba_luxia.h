@@ -77,6 +77,9 @@ typedef struct {
     int (*read_unit)(void *ctx, int space, const char *name, const char **text,
                      size_t *len, const char **path);
     void *read_ctx;
+    /* no try in the program and its units, and none of the library
+       reached (specification § 10.4): luxia --restrict=no_handlers */
+    bool no_handlers;
 } limba_luxia_options;
 
 enum { LIMBA_LUXIA_PROGRAM_UNIT, LIMBA_LUXIA_STDLIB_UNIT };

@@ -329,6 +329,14 @@ void lxl_at(lxl *L, uint32_t node)
     limba_ssa_func(L->ssa)->pos_cur = L->node_pos[node] - 1;
 }
 
+limba_id lxl_block(lxl *L)
+{
+    limba_id b = limba_ssa_block(L->ssa);
+    if (L->handler != LIMBA_NONE)
+        limba_block_set_handler(limba_ssa_func(L->ssa), b, L->handler);
+    return b;
+}
+
 void lxl_goto_new(lxl *L, limba_id b)
 {
     limba_ssa_br(L->ssa, L->cur, b);
@@ -338,7 +346,7 @@ void lxl_goto_new(lxl *L, limba_id b)
 /* after return, exit, continue: the code that follows is unreachable */
 static void dead_end(lxl *L)
 {
-    limba_id b = limba_ssa_block(L->ssa);
+    limba_id b = lxl_block(L);
     limba_ssa_seal(L->ssa, b);
     L->cur = b;
 }
@@ -353,10 +361,16 @@ static void local(lxl *L, limba_sym s)
     if (!t)
         return;
     const limba_typeinfo *x = ti(L, t);
+    bool shadow = false;
     if (lxl_scalar(L, t) && !L->taken[s]) {
-        st->kind = LXL_SSA;
-        st->var = limba_ssa_var(L->ssa, lxl_type(L, t));
-        return;
+        if (!L->trysl[s]) {
+            st->kind = LXL_SSA;
+            st->var = limba_ssa_var(L->ssa, lxl_type(L, t));
+            return;
+        }
+        /* assigned inside a try, read maybe in its handler or after it:
+           in a slot, its definite assignment followed by a shadow */
+        shadow = true;
     }
     limba_func *f = limba_ssa_func(L->ssa);
     uint64_t size = x->size ? x->size : 8;
@@ -376,6 +390,11 @@ static void local(lxl *L, limba_sym s)
     st->kind = LXL_MEM;
     st->addr = lxl_emit(L, LIMBA_OP_SLOT, LIMBA_T_PTR, 0, slot, 0, NULL, 0);
     L->cur = cur;
+    if (shadow) {
+        st->shadow = limba_ssa_var(L->ssa, LIMBA_T_PTR) + 1;
+        LIMBA_GROW(L->shadowed, L->nshadowed, L->capshadowed);
+        L->shadowed[L->nshadowed++] = s;
+    }
     /* a slot is zeroed at the entry of its function (IR § 4): only a
        declaration inside a loop starts again from zero, its Strings of
        the round before released */
@@ -420,13 +439,18 @@ static void free_dyns(lxl *L, uint32_t n)
     }
 }
 
+void lxl_free_dyns(lxl *L, uint32_t n)
+{
+    free_dyns(L, n);
+}
+
 /* the elements of type et in the bytes at p, none assigned: the first
    made invalid (§ 4.5), then copies that double what is done */
 void lxl_fill_dyn(lxl *L, limba_id p, limba_id bytes, limba_ltype et)
 {
     int64_t esize = (int64_t)ti(L, et)->size;
-    limba_id first = limba_ssa_block(L->ssa), head = limba_ssa_block(L->ssa),
-             body = limba_ssa_block(L->ssa), out = limba_ssa_block(L->ssa);
+    limba_id first = lxl_block(L), head = lxl_block(L), body = lxl_block(L),
+             out = lxl_block(L);
     uint32_t c[2] = {bytes, lxl_iconst(L, LIMBA_T_I64, 0)};
     limba_id some =
         lxl_emit(L, LIMBA_OP_ICMP, LIMBA_T_I1, LIMBA_CC_NE, 0, 0, c, 2);
@@ -624,17 +648,17 @@ static void pragma(lxl *L, uint32_t node);
 static void push_loop(lxl *L, limba_id exit, limba_id cont)
 {
     LIMBA_GROW(L->loops, L->nloops, L->caploops);
-    L->loops[L->nloops++] = (lxl_loop){exit, cont, L->ndyns};
+    L->loops[L->nloops++] = (lxl_loop){exit, cont, L->ndyns, L->ntrys};
 }
 
 static void if_stmt(lxl *L, uint32_t node)
 {
     const limba_lx_node *x = nd(L, node);
     uint32_t arms = x->a, other = x->b;
-    limba_id join = limba_ssa_block(L->ssa);
+    limba_id join = lxl_block(L);
     for (uint32_t i = 0; i < list_n(L, arms); i++) {
         uint32_t arm = list_at(L, arms, i);
-        limba_id yes = limba_ssa_block(L->ssa), no = limba_ssa_block(L->ssa);
+        limba_id yes = lxl_block(L), no = lxl_block(L);
         lxl_branch(L, nd(L, arm)->a, yes, no);
         limba_ssa_seal(L->ssa, yes);
         limba_ssa_seal(L->ssa, no);
@@ -656,8 +680,7 @@ static void while_stmt(lxl *L, uint32_t node)
 {
     const limba_lx_node *x = nd(L, node);
     uint32_t cond = x->a, body = x->b;
-    limba_id head = limba_ssa_block(L->ssa), in = limba_ssa_block(L->ssa),
-             out = limba_ssa_block(L->ssa);
+    limba_id head = lxl_block(L), in = lxl_block(L), out = lxl_block(L);
     lxl_goto_new(L, head);
     lxl_branch(L, cond, in, out);
     limba_ssa_seal(L->ssa, in);
@@ -676,8 +699,7 @@ static void repeat_stmt(lxl *L, uint32_t node)
 {
     const limba_lx_node *x = nd(L, node);
     uint32_t body = x->a, cond = x->b;
-    limba_id top = limba_ssa_block(L->ssa), test = limba_ssa_block(L->ssa),
-             out = limba_ssa_block(L->ssa);
+    limba_id top = lxl_block(L), test = lxl_block(L), out = lxl_block(L);
     lxl_goto_new(L, top);
     push_loop(L, out, test);
     stmts(L, body);
@@ -694,7 +716,7 @@ static void repeat_stmt(lxl *L, uint32_t node)
 
 static void loop_stmt(lxl *L, uint32_t node)
 {
-    limba_id top = limba_ssa_block(L->ssa), out = limba_ssa_block(L->ssa);
+    limba_id top = lxl_block(L), out = lxl_block(L);
     lxl_goto_new(L, top);
     push_loop(L, out, top);
     stmts(L, nd(L, node)->a);
@@ -799,8 +821,8 @@ static void for_stmt(lxl *L, uint32_t node)
                        : (sg ? LIMBA_CC_SLE : LIMBA_CC_ULE);
     uint32_t c[2] = {from, to};
     limba_id enter = lxl_emit(L, LIMBA_OP_ICMP, LIMBA_T_I1, cc, 0, 0, c, 2);
-    limba_id bodyb = limba_ssa_block(L->ssa), latch = limba_ssa_block(L->ssa),
-             step = limba_ssa_block(L->ssa), out = limba_ssa_block(L->ssa);
+    limba_id bodyb = lxl_block(L), latch = lxl_block(L), step = lxl_block(L),
+             out = lxl_block(L);
     lxl_store *st = &L->store[s];
     st->kind = LXL_SSA;
     st->var = limba_ssa_var(L->ssa, it);
@@ -840,14 +862,14 @@ static void case_stmt(lxl *L, uint32_t node)
     uint32_t sel = x->a, whens = x->b, other = x->c;
     limba_id v = lxl_value(L, sel);
     limba_id from = L->cur;
-    limba_id join = limba_ssa_block(L->ssa), dflt = limba_ssa_block(L->ssa);
+    limba_id join = lxl_block(L), dflt = lxl_block(L);
     int64_t *vals = NULL;
     limba_id *targets = NULL;
     uint32_t n = 0, capv = 0, capt = 0, nt = 0;
     limba_id *arm = limba_xmalloc((list_n(L, whens) + 1) * sizeof(*arm));
     for (uint32_t i = 0; i < list_n(L, whens); i++) {
         uint32_t w = list_at(L, whens, i), labels = nd(L, w)->a;
-        arm[i] = limba_ssa_block(L->ssa);
+        arm[i] = lxl_block(L);
         for (uint32_t k = 0; k < list_n(L, labels); k++) {
             uint32_t lab = list_at(L, labels, k);
             __int128 lo = 0, hi;
@@ -897,22 +919,27 @@ static void exit_stmt(lxl *L, uint32_t node, bool exit)
         return;
     const lxl_loop *lp = &L->loops[L->nloops - 1];
     limba_id target = exit ? lp->exit : lp->cont;
-    uint32_t keep = lp->ndyn;
+    uint32_t keep = lp->ndyn, ntrys = lp->ntrys, ndyns = L->ndyns;
     if (!cond) {
+        /* the finally of the try statements left run first (§ 7.9) */
+        lxl_leave_trys(L, ntrys);
         free_dyns(L, keep);
+        L->ndyns = ndyns;
         limba_ssa_br(L->ssa, L->cur, target);
         dead_end(L);
         return;
     }
-    limba_id go_on = limba_ssa_block(L->ssa);
-    if (L->ndyns > keep) {
+    limba_id go_on = lxl_block(L);
+    if (L->ndyns > keep || L->ntrys > ntrys) {
         /* the arrays of the loop body are freed on the way out */
-        limba_id leave = limba_ssa_block(L->ssa);
+        limba_id leave = lxl_block(L);
         lxl_branch(L, cond, leave, go_on);
         limba_ssa_seal(L->ssa, leave);
         L->cur = leave;
+        lxl_leave_trys(L, ntrys);
         free_dyns(L, keep);
-        limba_ssa_br(L->ssa, leave, target);
+        L->ndyns = ndyns;
+        limba_ssa_br(L->ssa, L->cur, target);
     } else {
         lxl_branch(L, cond, target, go_on);
     }
@@ -934,8 +961,13 @@ static void return_stmt(lxl *L, uint32_t node)
         lxl_at(L, node); /* a range is checked at the return */
         v = lxl_coerce(L, v, L->S->type[e], L->result);
     }
+    /* the finally around run after the value, before the out
+       parameters go back (§ 7.9, § 8.1) */
+    uint32_t ndyns = L->ndyns;
+    lxl_leave_trys(L, 0);
     store_outs(L, node);
     free_dyns(L, 0);
+    L->ndyns = ndyns;
     limba_ssa_ret(L->ssa, L->cur, v);
     dead_end(L);
 }
@@ -994,6 +1026,12 @@ static void stmt(lxl *L, uint32_t node)
     case LXN_PRAGMA:
         pragma(L, node);
         break;
+    case LXN_TRY:
+        lxl_try_stmt(L, node);
+        break;
+    case LXN_RAISE:
+        lxl_raise_stmt(L, node);
+        break;
     }
 }
 
@@ -1013,6 +1051,11 @@ static void pragmas(lxl *L, uint32_t list)
     for (uint32_t i = 0; i < list_n(L, list); i++)
         if (nd(L, list_at(L, list, i))->kind == LXN_PRAGMA)
             pragma(L, list_at(L, list, i));
+}
+
+void lxl_stmts(lxl *L, uint32_t list)
+{
+    stmts(L, list);
 }
 
 static void stmts(lxl *L, uint32_t list)
@@ -1206,6 +1249,8 @@ static void begin_function(lxl *L, limba_id fid)
     L->env = LIMBA_NONE;
     L->routine_sym = 0;
     L->nrplace = 0;
+    L->handler = LIMBA_NONE;
+    L->ntrys = L->noccs = L->nshadowed = 0;
     if (L->capvia)
         memset(L->via, 0xff, (size_t)L->capvia * sizeof(*L->via));
 }
@@ -1321,7 +1366,7 @@ static void routine_body(lxl *L, limba_sym s)
                    environment when a nested routine names it) */
                 if (lxl_env_value(L, ps)) {
                     /* set by lxl_env_begin */
-                } else if (L->taken[ps]) {
+                } else if (L->taken[ps] || L->trysl[ps]) {
                     local(L, ps);
                 } else {
                     st->kind = LXL_SSA;
@@ -1670,6 +1715,8 @@ limba_module *limba_lxl_program_each(limba_lxs *S,
     L->node_pos = limba_xcalloc(S->t->nnode + 1, sizeof(*L->node_pos));
     L->eq_of = limba_xcalloc(S->ts.n + 1, sizeof(*L->eq_of));
     scan_taken(L);
+    L->trysl = limba_xcalloc(S->st.nsym + 1, 1);
+    lxl_exc_scan(L);
     lxl_nest_prepare(L);
     /* the files in the order of their initialisations, the program last
        (§ 11.5); the checks each file turns off for the whole of it */
@@ -1803,6 +1850,11 @@ done:
     free(L->store);
     free(L->taken);
     free(L->assigned);
+    free(L->trysl);
+    free(L->trys);
+    free(L->occs);
+    free(L->shadowed);
+    free(L->idents);
     free(L->func_of);
     free(L->tmap);
     free(L->loops);

@@ -76,6 +76,8 @@ const char *limba_lxp_describe(const limba_lxp *P, uint32_t tok, char *buf,
 uint32_t limba_lxp_name(limba_lxp *P);  /* ident -> NAME */
 uint32_t limba_lxp_names(limba_lxp *P); /* IdentList -> LIST of NAME */
 uint32_t limba_lxp_type(limba_lxp *P);
+/* QualIdent -> TNAME without a range: Name, or Unit.Name */
+uint32_t limba_lxp_qualident(limba_lxp *P);
 uint32_t limba_lxp_constdecl(limba_lxp *P);
 uint32_t limba_lxp_vardecl(limba_lxp *P);
 /* close the construct opened by token opener: end, with the check that

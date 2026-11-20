@@ -602,8 +602,7 @@ static limba_id as_string(lxl *L, limba_id v, limba_ltype t)
 static limba_id bool_value(lxl *L, uint32_t node)
 {
     uint32_t var = limba_ssa_var(L->ssa, LIMBA_T_I1);
-    limba_id t = limba_ssa_block(L->ssa), f = limba_ssa_block(L->ssa),
-             join = limba_ssa_block(L->ssa);
+    limba_id t = lxl_block(L), f = lxl_block(L), join = lxl_block(L);
     lxl_branch(L, node, t, f);
     limba_ssa_seal(L->ssa, t);
     limba_ssa_seal(L->ssa, f);
@@ -632,7 +631,7 @@ void lxl_branch(lxl *L, uint32_t node, limba_id t, limba_id f)
 {
     limba_lx_node *x = nd(L, node);
     if (x->kind == LXN_BINARY && is_logic(L, node)) {
-        limba_id mid = limba_ssa_block(L->ssa);
+        limba_id mid = lxl_block(L);
         if (x->op == LX_KW_AND)
             lxl_branch(L, x->a, mid, f);
         else
@@ -931,8 +930,7 @@ static void agg_run(lxl *L, limba_id p, limba_ltype et, limba_id pos,
                     uint32_t nskip, limba_id base, bool sg)
 {
     int64_t esize = (int64_t)ti(L, et)->size;
-    limba_id head = limba_ssa_block(L->ssa), body = limba_ssa_block(L->ssa),
-             out = limba_ssa_block(L->ssa);
+    limba_id head = lxl_block(L), body = lxl_block(L), out = lxl_block(L);
     uint32_t k = limba_ssa_var(L->ssa, LIMBA_T_I64);
     limba_ssa_def(L->ssa, k, L->cur, lxl_iconst(L, LIMBA_T_I64, 0));
     limba_ssa_br(L->ssa, L->cur, head);
@@ -955,8 +953,8 @@ static void agg_run(lxl *L, limba_id p, limba_ltype et, limba_id pos,
             limba_id in = bin(L, LIMBA_OP_AND, LIMBA_T_I1, a, b);
             named = j ? bin(L, LIMBA_OP_OR, LIMBA_T_I1, named, in) : in;
         }
-        limba_id put = limba_ssa_block(L->ssa);
-        next = limba_ssa_block(L->ssa);
+        limba_id put = lxl_block(L);
+        next = lxl_block(L);
         limba_ssa_cbr(L->ssa, L->cur, named, next, put);
         limba_ssa_seal(L->ssa, put);
         L->cur = put;
@@ -1389,7 +1387,7 @@ static int64_t static_length(lxl *L, limba_ltype t)
 /* in a comparison function: return code if cond holds */
 static void eq_ret_if(lxl *L, limba_id cond, int code)
 {
-    limba_id ret = limba_ssa_block(L->ssa), go = limba_ssa_block(L->ssa);
+    limba_id ret = lxl_block(L), go = lxl_block(L);
     limba_ssa_cbr(L->ssa, L->cur, cond, ret, go);
     limba_ssa_seal(L->ssa, ret);
     limba_ssa_seal(L->ssa, go);
@@ -1461,7 +1459,7 @@ static void eq_component(lxl *L, limba_ltype t, limba_id a, limba_id b)
                          ? lxl_iconst(L, LIMBA_T_I64, static_length(L, t))
                          : LIMBA_NONE;
         limba_id st = eq_call(L, t, a, n, b, n);
-        limba_id ret = limba_ssa_block(L->ssa), go = limba_ssa_block(L->ssa);
+        limba_id ret = lxl_block(L), go = lxl_block(L);
         limba_ssa_cbr(
             L->ssa, L->cur,
             cmp(L, false, LIMBA_CC_NE, st, lxl_iconst(L, LIMBA_T_I32, EQ_SAME)),
@@ -1510,8 +1508,7 @@ static void eq_body(lxl *L, limba_ltype t, limba_id fid)
         /* the same number of elements, then each, from the first */
         eq_ret_if(L, cmp(L, false, LIMBA_CC_NE, p[1], p[3]), EQ_DIFF);
         int64_t esize = (int64_t)ti(L, x->elem)->size;
-        limba_id head = limba_ssa_block(L->ssa), body = limba_ssa_block(L->ssa),
-                 out = limba_ssa_block(L->ssa);
+        limba_id head = lxl_block(L), body = lxl_block(L), out = lxl_block(L);
         uint32_t k = limba_ssa_var(L->ssa, LIMBA_T_I64);
         limba_ssa_def(L->ssa, k, L->cur, zero);
         limba_ssa_br(L->ssa, L->cur, head);
@@ -1983,6 +1980,8 @@ limba_id lxl_value(lxl *L, uint32_t node)
     case LXN_INDEX:
     case LXN_DEREF: {
         limba_ltype bt = ntype(L, x->a);
+        if (x->kind == LXN_SEL && bt == S->ts.occurrence)
+            return lxl_occ_component(L, node); /* e.message (§ 3.16) */
         if (x->kind == LXN_INDEX && ti(L, bt)->kind == LIMBA_LTK_STRING) {
             /* s[i]: a byte, from 1 to length(s) */
             limba_id s = lxl_value(L, x->a);

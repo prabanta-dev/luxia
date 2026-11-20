@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+// StorageError: no handler takes it, else included, and no finally runs
+// (§ 10.1).
+program exc_storage;
+var k: Int32 := 0;
+begin
+  try
+    try
+      raise StorageError with "full";
+    except
+      else
+        writeln("never");
+    end;
+  finally
+    writeln("never either");
+  end;
+end exc_storage.

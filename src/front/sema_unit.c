@@ -991,6 +991,52 @@ void lxs_check_units(limba_lxs *S)
     free(path);
 }
 
+/* the chain of the calls that reach routine x, from it back to an
+   initialisation, after the at bytes of chain; *node the first call */
+static void chain_of(limba_lxs *S, const uint32_t *first, limba_sym x,
+                     char *chain, size_t cap, size_t at, uint32_t *node_out)
+{
+    {
+        uint32_t use = first[x] - 1, node = S->uses[use].node;
+        size_t n;
+        const char *sp;
+        for (int depth = 0; depth < 16; depth++) {
+            uint32_t who = S->uses[use].who;
+            node = S->uses[use].node;
+            if (who & LXS_INIT) {
+                const char *a;
+                uint32_t na;
+                name_of(S, who & ~LXS_INIT, &a, &na);
+                if (at < cap)
+                    at += (size_t)snprintf(
+                        chain + at, cap - at,
+                        is_program(S, who & ~LXS_INIT)
+                            ? ", reached from the program"
+                            : ", reached from the initialisation of %.*s",
+                        (int)na, a);
+                break;
+            }
+            sp = lxs_spell(S, who, &n);
+            if (at < cap) {
+                const limba_lxs_use *uu = &S->uses[use];
+                char tb[128];
+                if (uu->via)
+                    at += (size_t)snprintf(
+                        chain + at, cap - at,
+                        ", called by %.*s through a value of %s", (int)n, sp,
+                        lxs_tname(S, uu->ptype, tb));
+                else
+                    at += (size_t)snprintf(chain + at, cap - at,
+                                           ", called by %.*s", (int)n, sp);
+            }
+            if (!first[who])
+                break;
+            use = first[who] - 1;
+        }
+        *node_out = node;
+    }
+}
+
 /* under the program's restrictions(no_external), a routine of C of the
    library reached: an error at the first call of the chain, which the
    message tells (§ 10.4) */
@@ -1006,52 +1052,46 @@ static void library_c(limba_lxs *S, const uint32_t *first, uint32_t ns)
         bool impl;
         if (!S->units[lxs_unit_of(S, y->scope, &impl)].library)
             continue;
-        /* the chain, from the routine of C back to an initialisation */
         char chain[600];
-        size_t at = 0;
-        uint32_t use = first[x] - 1, node = S->uses[use].node;
         size_t n;
         const char *sp = lxs_spell(S, x, &n);
-        at += (size_t)snprintf(chain, sizeof(chain), "the routine of C '%.*s'",
-                               (int)n, sp);
-        for (int depth = 0; depth < 16; depth++) {
-            uint32_t who = S->uses[use].who;
-            node = S->uses[use].node;
-            if (who & LXS_INIT) {
-                const char *a;
-                uint32_t na;
-                name_of(S, who & ~LXS_INIT, &a, &na);
-                if (at < sizeof(chain))
-                    at += (size_t)snprintf(
-                        chain + at, sizeof(chain) - at,
-                        is_program(S, who & ~LXS_INIT)
-                            ? ", reached from the program"
-                            : ", reached from the initialisation of %.*s",
-                        (int)na, a);
-                break;
-            }
-            sp = lxs_spell(S, who, &n);
-            if (at < sizeof(chain)) {
-                const limba_lxs_use *uu = &S->uses[use];
-                char tb[128];
-                if (uu->via)
-                    at += (size_t)snprintf(
-                        chain + at, sizeof(chain) - at,
-                        ", called by %.*s through a value of %s", (int)n, sp,
-                        lxs_tname(S, uu->ptype, tb));
-                else
-                    at += (size_t)snprintf(chain + at, sizeof(chain) - at,
-                                           ", called by %.*s", (int)n, sp);
-            }
-            if (!first[who])
-                break;
-            use = first[who] - 1;
-        }
+        size_t at = (size_t)snprintf(chain, sizeof(chain),
+                                     "the routine of C '%.*s'", (int)n, sp);
+        uint32_t node = 0;
+        chain_of(S, first, x, chain, sizeof(chain), at, &node);
         lxs_error(S, LXE_LIBRARY_C, node,
                   "pragma restrictions(no_external) forbids the boundary "
                   "with C, which the library crosses here: %s",
                   chain);
     }
+}
+
+/* under restrictions(no_handlers), a routine of the library with a try
+   reached, or the initialisation of a unit of the library with one: an
+   error at the first call of the chain, or at the try (§ 10.4) */
+static void library_try(limba_lxs *S, const uint32_t *first, uint32_t ns)
+{
+    for (limba_sym x = 1; x < ns && x < S->st.nsym && x < S->ntry_at; x++) {
+        if (!first[x] || !S->try_at[x] ||
+            S->st.sym[x].kind != LIMBA_LSYM_ROUTINE)
+            continue;
+        char chain[600];
+        size_t n;
+        const char *sp = lxs_spell(S, x, &n);
+        size_t at = (size_t)snprintf(chain, sizeof(chain),
+                                     "the routine '%.*s' has one", (int)n, sp);
+        uint32_t node = 0;
+        chain_of(S, first, x, chain, sizeof(chain), at, &node);
+        lxs_error(S, LXE_NO_HANDLERS, node,
+                  "pragma restrictions(no_handlers) forbids try, which the "
+                  "library has here: %s",
+                  chain);
+    }
+    for (uint32_t u = 0; u < S->nunits; u++)
+        if (S->units[u].library && S->units[u].try_node)
+            lxs_error(S, LXE_NO_HANDLERS, S->units[u].try_node,
+                      "pragma restrictions(no_handlers) forbids try, which "
+                      "the initialisation of this unit of the library has");
 }
 
 /* a variable of a file given by address to a routine that can write
@@ -1273,6 +1313,8 @@ void lxs_unit_warnings(limba_lxs *S)
         S->reached[s] = first[s] != 0;
     if (S->no_external)
         library_c(S, first, ns);
+    if (S->no_handlers)
+        library_try(S, first, ns);
     free(first);
     free(todo);
     if (S->nunits > 1)

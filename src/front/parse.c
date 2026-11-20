@@ -199,6 +199,25 @@ static void sync_decl(limba_lxp *P)
 
 static uint32_t params(limba_lxp *P);
 
+uint32_t limba_lxp_qualident(limba_lxp *P)
+{
+    limba_loc loc = lxp_loc(P);
+    if (lxp_kind(P) != LX_IDENT) {
+        limba_lxp_expected(P, "a name");
+        return lxp_node(P, LXN_ERROR, loc, 0, 0, 0, 0);
+    }
+    uint32_t name = P->lx->tok[P->pos].val, unit = 0;
+    limba_lxp_next(P);
+    if (lxp_kind(P) == LX_DOT && P->lx->tok[P->pos + 1].kind == LX_IDENT) {
+        unit = lxp_node(P, LXN_REF, loc, name, 0, 0, 0);
+        limba_lxp_next(P);
+        loc = lxp_loc(P);
+        name = P->lx->tok[P->pos].val;
+        limba_lxp_next(P);
+    }
+    return lxp_node(P, LXN_TNAME, loc, name, 0, 0, unit);
+}
+
 uint32_t limba_lxp_type(limba_lxp *P)
 {
     uint32_t start = P->pos;
@@ -291,6 +310,16 @@ uint32_t limba_lxp_type(limba_lxp *P)
         uint32_t n = lxp_node(P, LXN_TPROC, loc, ps, result, 0, 0);
         P->t->node[n].op = (uint8_t)kind;
         return n;
+    }
+    case LX_KW_EXCEPTION: {
+        /* exception [(Parent)] (§ 3.16): the semantic phase says where */
+        limba_lxp_next(P);
+        uint32_t parent = 0;
+        if (limba_lxp_accept(P, LX_LPAREN)) {
+            parent = limba_lxp_qualident(P);
+            limba_lxp_expect(P, LX_RPAREN, "after the parent exception");
+        }
+        return lxp_node(P, LXN_TEXC, loc, parent, 0, 0, 0);
     }
     default:
         limba_lxp_expected(P, "a type");

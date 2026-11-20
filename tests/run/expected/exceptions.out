@@ -1,0 +1,30 @@
+F finally 0 2
+2
+F finally 1 1
+10
+F finally 2 1
+caught two exceptions.luxia:21:7
+loop finally 1
+loop finally 2
+loop finally 3
+loop finally 4
+total 4
+SetOut sees 2
+y 2
+Bump Other inner
+Nested Other 2
+replaced by Other second
+else ab
+in
+fin
+y 7
+y kept 1
+inner finally 1
+inner finally 3
+outer caught start++ start++ 3
+IndexError: index out of range abcdef
+ProgramError: invalid dispose
+rethrow finally
+outer else
+before
+last finally

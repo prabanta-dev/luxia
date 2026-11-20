@@ -8,6 +8,7 @@
 #include "sema.h"
 
 #include "common/xalloc.h"
+#include "limba/ir.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -280,6 +281,33 @@ static void universe(limba_lxs *S)
         S->st.sym[s].type = S->ts.char_;
         S->st.sym[s].value = lxs_value_int(S, chars[i].code);
     }
+    /* the predefined exceptions (§ 3.16, § 10.1): four families, the
+       errors of the checks in the first; identities of traps.def */
+    static const struct {
+        const char *name;
+        int id, parent; /* parent: an index here, -1 for none */
+    } excs[] = {
+        {"ConstraintError", LIMBA_FAMILY_CONSTRAINT, -1},
+        {"StorageError", LIMBA_FAMILY_STORAGE, -1},
+        {"ProgramError", LIMBA_FAMILY_PROGRAM, -1},
+        {"InputOutputError", LIMBA_FAMILY_INPUT_OUTPUT, -1},
+        {"OverflowError", LIMBA_TRAP_OVERFLOW, 0},
+        {"DivisionError", LIMBA_TRAP_DIVZERO, 0},
+        {"IndexError", LIMBA_TRAP_INDEX, 0},
+        {"RangeError", LIMBA_TRAP_RANGE, 0},
+        {"NilError", LIMBA_TRAP_NIL, 0},
+        {"ConversionError", LIMBA_TRAP_CONVERSION, 0},
+        {"ShiftError", LIMBA_TRAP_SHIFT, 0},
+        {"DanglingError", LIMBA_TRAP_DANGLING, 0},
+        {"LengthError", LIMBA_TRAP_LENGTH, 0},
+    };
+    limba_ltype et[sizeof(excs) / sizeof(excs[0])];
+    for (size_t i = 0; i < sizeof(excs) / sizeof(excs[0]); i++) {
+        et[i] = limba_types_exception(
+            &S->ts, excs[i].id, excs[i].parent < 0 ? 0 : et[excs[i].parent]);
+        universe_type(S, excs[i].name, et[i]);
+    }
+    S->ty_storage = et[1];
     for (size_t i = 0; i < sizeof(builtins) / sizeof(builtins[0]); i++) {
         limba_sym s = universe_sym(S, builtins[i].name, LIMBA_LSYM_BUILTIN);
         S->st.sym[s].value = builtins[i].id;
@@ -321,6 +349,7 @@ void limba_lxs_free(limba_lxs *S)
     for (uint32_t i = 0; i < S->nv; i++)
         limba_rat_free(&S->v[i].num);
     free(S->v);
+    free(S->try_at);
     free(S->type);
     free(S->sym);
     free(S->val);
@@ -1087,6 +1116,12 @@ static limba_ltype type_node(limba_lxs *S, uint32_t node, uint32_t scope,
     switch (x->kind) {
     case LXN_TNAME: {
         limba_ltype t = named(S, node, scope, false, &dyn);
+        if (t && lxs_ty(S, t)->kind == LIMBA_LTK_EXCEPTION) {
+            lxs_error(S, LXE_EXCEPTION_PLACE, node,
+                      "an exception is no type of values: it is raised and "
+                      "taken by a handler");
+            return 0;
+        }
         if (t && lxs_ty(S, t)->kind == LIMBA_LTK_OPEN &&
             !(where & (LXT_PARAM | LXT_DECL | LXT_PTR))) {
             lxs_error(S, LXE_OPEN_ARRAY_PLACE, node,
@@ -1295,6 +1330,8 @@ static limba_ltype type_node(limba_lxs *S, uint32_t node, uint32_t scope,
         free(ps);
         return t;
     }
+    case LXN_TEXC:
+        return lxs_exc_type(S, node, scope, where, self);
     case LXN_TPTR: {
         limba_ltype p = limba_types_pointer(&S->ts, 0);
         if (self)
@@ -1516,9 +1553,17 @@ void lxs_c_pragma(limba_lxs *S, uint32_t node, uint32_t scope)
             lxs_error(S, LXE_C_PRAGMA, node,
                       "pragma restrictions goes among the declarations of "
                       "the program or of a unit");
+        } else if (n == 1 && len == 11 && !memcmp(a0, "no_handlers", 11)) {
+            /* no try (§ 10.4): the program and its units, or a unit */
+            if (!S->nunits ||
+                lxs_node(S, S->units[lxs_unit_at(S, node)].root)->kind ==
+                    LXN_PROGRAM)
+                S->no_handlers = true;
+            else
+                S->units[lxs_unit_at(S, node)].no_handlers = true;
         } else if (n != 1 || len != 11 || memcmp(a0, "no_external", 11)) {
             lxs_error(S, LXE_C_PRAGMA, node,
-                      "the restriction is no_external: "
+                      "the restrictions are no_external and no_handlers: "
                       "'pragma restrictions(no_external)'");
         } else if (!S->nunits ||
                    lxs_node(S, S->units[lxs_unit_at(S, node)].root)->kind ==

@@ -56,7 +56,9 @@ limba_module *limba_lxl_program_each(limba_lxs *S,
 
 /* ---- inside the generator ---- */
 
-enum { LXL_NONE, LXL_SSA, LXL_MEM, LXL_GLOBAL, LXL_OPEN, LXL_DYN };
+/* LXL_OCC: the occurrence a branch of except names (§ 7.9): lo its
+   identity, hi its position, addr its message, values of the handler */
+enum { LXL_NONE, LXL_SSA, LXL_MEM, LXL_GLOBAL, LXL_OPEN, LXL_DYN, LXL_OCC };
 
 typedef struct {
     uint8_t kind;
@@ -116,8 +118,23 @@ typedef struct {
 
 typedef struct {
     limba_id exit, cont;
-    uint32_t ndyn; /* the computed arrays alive when the loop began */
+    uint32_t ndyn;  /* the computed arrays alive when the loop began */
+    uint32_t ntrys; /* the try statements around it */
 } lxl_loop;
+
+/* a try being translated (§ 7.9, lower_exc.c): its finally (0: none),
+   the handler around it, and what was alive where it began: the
+   computed arrays, the occurrences of the branches around */
+typedef struct {
+    uint32_t fin;
+    limba_id outer;
+    uint32_t ndyn, nocc;
+} lxl_try;
+
+/* the occurrence of a branch: the three parameters of its handler */
+typedef struct {
+    limba_id id, pos, msg;
+} lxl_occ;
 
 typedef struct {
     limba_lxs *S;
@@ -200,10 +217,47 @@ typedef struct {
     limba_id env;
     uint32_t *rplace;
     uint32_t nrplace, caprplace;
+    /* exceptions (lower_exc.c, § 7.9): per symbol, a scalar assigned
+       inside a try and declared outside it (kept in a slot, with a
+       shadow); the handler the blocks made now get (LIMBA_NONE: none);
+       the try statements and the branches of except around; the
+       variables with a shadow in the function being built; the
+       identities a handler may see, with their exceptions and names
+       (made once) */
+    uint8_t *trysl;
+    limba_id handler;
+    lxl_try *trys;
+    uint32_t ntrys, captrys;
+    lxl_occ *occs;
+    uint32_t noccs, capoccs;
+    limba_sym *shadowed;
+    uint32_t nshadowed, capshadowed;
+    struct lxl_ident {
+        int64_t id;
+        limba_ltype exc; /* the exception a branch names that takes it */
+        limba_id name;   /* interned: what e.name gives */
+    } *idents;
+    uint32_t nidents;
+    bool idents_made;
 } lxl;
 
 /* exceptions (lower_exc.c, § 3.16, § 7.9): the table of the module */
 void lxl_exc_table(lxl *L);
+/* which variables are assigned inside a try (trysl), once */
+void lxl_exc_scan(lxl *L);
+void lxl_try_stmt(lxl *L, uint32_t node);
+void lxl_raise_stmt(lxl *L, uint32_t node);
+/* e.message, e.position, e.name: the SEL node */
+limba_id lxl_occ_component(lxl *L, uint32_t node);
+/* a jump out of the try statements from the n-th on (exit, continue,
+   return): their finally run, innermost first, each with the handler
+   around it; the computed arrays inside them freed first */
+void lxl_leave_trys(lxl *L, uint32_t n);
+/* a new block, protected by the handler of now */
+limba_id lxl_block(lxl *L);
+/* statements, and the computed arrays from the n-th on freed (lower.c) */
+void lxl_stmts(lxl *L, uint32_t list);
+void lxl_free_dyns(lxl *L, uint32_t n);
 
 /* nested routines (lower_nest.c, § 8.9) */
 /* the environments and the sets of definite assignment, once */

@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+unit Geo;
+interface
+type
+  NotFound = exception;
+procedure Find(k: Int32);
+implementation
+type Hidden = exception(NotFound);
+procedure Find(k: Int32);
+begin
+  if k = 1 then raise NotFound with "one"; end;
+  if k = 2 then raise Hidden; end;
+end Find;
+begin
+  try
+    Find(1);
+  except
+    when NotFound var e:
+      writeln("init ", e.name, " ", e.message, " ", e.position);
+  end;
+end Geo.

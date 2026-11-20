@@ -49,6 +49,9 @@ static void usage(FILE *out)
           "             library\n"
           "  --restrict=no_external\n"
           "             no boundary with C: an external routine is an error\n"
+          "  --restrict=no_handlers\n"
+          "             no try, in the program nor in the library it reaches\n"
+          "             (the option may be given twice, one of each)\n"
           "  --lib-path=DIR\n"
           "             a directory where the C libraries of the program are\n"
           "             looked for before the system's (the option may be\n"
@@ -140,6 +143,7 @@ static void end(void *ctx, const limba_module *m, int status)
 static int run(int argc, char **argv, const char **unit_dirs)
 {
     const char *input = NULL, *suppress = NULL, *restrict_ = NULL;
+    bool no_handlers = false;
     const char *stdlib = NULL, *emit = NULL, *outpath = NULL, *target = NULL;
     size_t nunit_dirs = 0;
     const char *libdirs[64];
@@ -182,10 +186,13 @@ static int run(int argc, char **argv, const char **unit_dirs)
         } else if (!strncmp(a, "--suppress=", 11)) {
             suppress = a + 11;
         } else if (!strncmp(a, "--restrict=", 11)) {
-            restrict_ = a + 11;
-            if (strcmp(restrict_, "no_external")) {
-                fprintf(stderr, "luxia: --restrict: the restriction is "
-                                "no_external\n");
+            if (!strcmp(a + 11, "no_handlers")) {
+                no_handlers = true;
+            } else if (!strcmp(a + 11, "no_external")) {
+                restrict_ = a + 11;
+            } else {
+                fprintf(stderr, "luxia: --restrict: the restrictions are "
+                                "no_external and no_handlers\n");
                 return 2;
             }
         } else if (!strcmp(a, "-I") && i + 1 < argc) {
@@ -246,7 +253,8 @@ static int run(int argc, char **argv, const char **unit_dirs)
         unit_dirs[nunit_dirs] = NULL;
         opt.verify_each = verify;
         return limba_luxia_emit(input, emit, outpath, check, level, &opt,
-                                suppress, target, restrict_, unit_dirs, stdlib);
+                                suppress, target, restrict_, no_handlers,
+                                unit_dirs, stdlib);
     }
 #ifndef NDEBUG
     verify = true;
@@ -255,6 +263,7 @@ static int run(int argc, char **argv, const char **unit_dirs)
                               .verify = verify,
                               .suppress = suppress,
                               .no_external = restrict_ != NULL,
+                              .no_handlers = no_handlers,
                               .diag_out = stderr,
                               .unit_path = unit_dirs,
                               .stdlib_path = stdlib};

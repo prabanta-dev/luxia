@@ -580,6 +580,39 @@ static void walk_stmt(walker *W, uint32_t node)
     case LXN_VAR:
         walk_expr(W, x->c);
         return;
+    case LXN_TRY: {
+        /* § 5.5: a handler and the finally see what was assigned before
+           the try; after it, what every way out of the statements and of
+           the branches assigns, and what the finally assigns */
+        uint32_t handlers = x->b, other = x->c, fin = x->d;
+        uint64_t *before = bs_copy(W, W->d);
+        walk_stmts(W, x->a);
+        uint64_t *join = bs_copy(W, W->d);
+        for (uint32_t i = 0; handlers && i < list_n(L, handlers); i++) {
+            bs_set(W, W->d, before);
+            walk_stmts(W, nd(L, list_at(L, handlers, i))->c);
+            bs_and(W, join, W->d);
+        }
+        if (other) {
+            bs_set(W, W->d, before);
+            walk_stmts(W, other);
+            bs_and(W, join, W->d);
+        }
+        if (fin) {
+            bs_set(W, W->d, before);
+            walk_stmts(W, fin);
+            for (uint32_t i = 0; i < W->nw; i++)
+                join[i] |= W->d[i];
+        }
+        bs_set(W, W->d, join);
+        free(before);
+        free(join);
+        return;
+    }
+    case LXN_RAISE:
+        walk_expr(W, x->b);
+        bs_all(W, W->d); /* the path goes on in a handler, not here */
+        return;
     }
 }
 
@@ -776,8 +809,11 @@ void lxl_env_begin(lxl *L, limba_sym o)
         if (c->how == CAP_VALUE) {
             st->kind = LXL_MEM;
             st->addr = field(L, c->off);
-            if (c->track >= 0)
+            if (c->track >= 0) {
                 st->shadow = limba_ssa_var(L->ssa, LIMBA_T_PTR) + 1;
+                LIMBA_GROW(L->shadowed, L->nshadowed, L->capshadowed);
+                L->shadowed[L->nshadowed++] = c->var;
+            }
         } else if (c->how == CAP_DYN) {
             /* an empty array until its declaration runs */
             limba_ltype it = ti(L, S->st.sym[c->var].type)->index;
@@ -876,8 +912,11 @@ void lxl_nest_begin(lxl *L, limba_sym n)
 void lxl_shadow_def(lxl *L, limba_sym s)
 {
     const lxl_store *st = &L->store[s];
+    /* a captured one is defined by the environment; a variable of a try
+       (lower_exc.c) by its slot: one value each, no instruction */
     if (st->shadow)
-        limba_ssa_def(L->ssa, st->shadow - 1, L->cur, L->env);
+        limba_ssa_def(L->ssa, st->shadow - 1, L->cur,
+                      L->env != LIMBA_NONE ? L->env : st->addr);
 }
 
 void lxl_shadow_use(lxl *L, limba_sym s, uint32_t tag)
