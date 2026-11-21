@@ -350,6 +350,8 @@ void limba_lxs_free(limba_lxs *S)
         limba_rat_free(&S->v[i].num);
     free(S->v);
     free(S->try_at);
+    free(S->handled);
+    free(S->fn_handled);
     free(S->type);
     free(S->sym);
     free(S->val);
@@ -1471,6 +1473,7 @@ void limba_lxs_check(limba_lxs *S)
     S->in_init = false;
     S->who = 0;
     lxs_unit_warnings(S);
+    lxs_exc_handled(S);
 }
 
 /* ---- the boundary with C (§ 3.13, § 8.5, § 10.4) ---- */

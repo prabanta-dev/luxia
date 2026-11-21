@@ -79,6 +79,9 @@ typedef struct {
     /* a captured scalar whose definite assignment is followed: its
        shadow SSA variable + 1 (lower_nest.c), 0 if none */
     uint32_t shadow;
+    /* DYN: the guard that frees it if an exception leaves (lower_exc.c),
+       0 if none */
+    uint32_t guard;
 } lxl_store;
 
 /* a variable a nested routine names, in the environment of the routine
@@ -226,6 +229,14 @@ typedef struct {
        (made once) */
     uint8_t *trysl;
     limba_id handler;
+    /* the function being built is under a handler (D157): the blocks of
+       the heap get a pad that frees them; the guards made in it */
+    bool fn_handled;
+    struct lxl_guard {
+        limba_id pad, outer, p, n, pp[3];
+        limba_ltype t;
+    } *guards;
+    uint32_t nguards, capguards;
     lxl_try *trys;
     uint32_t ntrys, captrys;
     lxl_occ *occs;
@@ -253,6 +264,15 @@ limba_id lxl_occ_component(lxl *L, uint32_t node);
    return): their finally run, innermost first, each with the handler
    around it; the computed arrays inside them freed first */
 void lxl_leave_trys(lxl *L, uint32_t n);
+/* a block of the heap at p of n cells of type t (D157): from here a pad
+   frees it (releasing its Strings) and raises again what leaves, in a
+   function under a handler; the guard + 1, 0 if none. leave: the code
+   from here is outside it (before its block is freed); close: its pad
+   written, once nothing more is protected by it; end: both */
+uint32_t lxl_guard_begin(lxl *L, limba_id p, limba_ltype t, limba_id n);
+void lxl_guard_leave(lxl *L, uint32_t g);
+void lxl_guard_close(lxl *L, uint32_t g);
+void lxl_guard_end(lxl *L, uint32_t g);
 /* a new block, protected by the handler of now */
 limba_id lxl_block(lxl *L);
 /* statements, and the computed arrays from the n-th on freed (lower.c) */

@@ -264,7 +264,9 @@ array[Colour] of T
   the body of the program, not in the variables declared among the
   declarations of the program or of a unit (interface or
   implementation), nor in types declared with `type`, nor in record
-  fields.
+  fields. The memory of such an array comes back when its statements
+  end, in any way: at their end, by `return`, `exit`, `continue`, or by
+  an exception (§ 7.9).
 - **An array with an empty index** has `length(a) = 0`; `low(a)` and
   `high(a)` remain the written bounds; every access is an index error;
   `for var i := low(a) to high(a)` does not run its body.
@@ -1369,6 +1371,8 @@ end Prog.
   the routine wrote (§ 8.1).
 - `halt` (§ 9.8) inside a `try` ends the program at once: no handler, no
   `finally`.
+- The memory of an array with computed bounds (§ 3.7) comes back when an
+  exception leaves its statements, as on every other way out.
 
 ## 8. Routines
 

@@ -329,6 +329,16 @@ typedef struct {
        restrictions(no_handlers) through the calls) */
     uint32_t *try_at;
     uint32_t ntry_at;
+    /* the routines under a handler (§ 13.8 of Limba's doc/ir.md), per
+       symbol: an exception that crosses them may be taken; main is when
+       an initialisation or the program has a try; some try anywhere.
+       Computed on the tree, never narrower than Limba's set. Per function
+       of the module made last, whether the generator took it to be under
+       a handler (for the tests) */
+    uint8_t *handled;
+    bool main_handled, any_try;
+    uint8_t *fn_handled;
+    uint32_t nfn_handled;
 } limba_lxs;
 
 void limba_lxs_init(limba_lxs *S, limba_lx_ast *t, limba_lx *lx,
@@ -604,6 +614,9 @@ void lxs_exc_raise(limba_lxs *S, uint32_t node, uint32_t scope);
 /* e.x of the occurrence s at SEL node: String for message, position and
    name; 0 (reported) for anything else */
 limba_ltype lxs_exc_component(limba_lxs *S, uint32_t node, limba_sym s);
+/* the routines under a handler, after the bodies; is s one */
+void lxs_exc_handled(limba_lxs *S);
+bool lxs_exc_handled_is(const limba_lxs *S, limba_sym s);
 /* is try forbidden where node is (§ 10.4) */
 bool lxs_no_handlers(const limba_lxs *S, uint32_t node);
 

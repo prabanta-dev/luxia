@@ -33,8 +33,12 @@
  * reference, raise gives it away; nothing is released or retained here
  * (doc/ir.md § 12.1).
  *
- * Not done: an array with computed bounds is not freed when an exception
- * leaves its statements (a choice still open).
+ * A block of the heap the generator makes, an array with computed bounds
+ * or a temporary of a comparison or an aggregate, has an implicit
+ * finally that frees it (D157): its copies on the ways out are those of
+ * free_dyns, and a pad frees it and raises again; the pad is made only
+ * in a function under a handler (lxs_exc_handled), where an exception
+ * may be taken, so that a program without try has the same IR.
  */
 #include "lower.h"
 
@@ -464,6 +468,57 @@ void lxl_try_stmt(lxl *L, uint32_t node)
     if (fin)
         finally_copy(L, fin, outer);
     free(pre);
+}
+
+/* ---- the blocks of the heap (D157) ---- */
+
+uint32_t lxl_guard_begin(lxl *L, limba_id p, limba_ltype t, limba_id n)
+{
+    if (!L->fn_handled)
+        return 0;
+    struct lxl_guard G = {0};
+    G.outer = L->handler;
+    G.pad = new_handler(L, L->handler, G.pp);
+    G.p = p;
+    G.n = n;
+    G.t = t;
+    LIMBA_GROW(L->guards, L->nguards, L->capguards);
+    L->guards[L->nguards++] = G;
+    L->handler = G.pad;
+    go_new(L);
+    return L->nguards;
+}
+
+void lxl_guard_leave(lxl *L, uint32_t g)
+{
+    if (!g)
+        return;
+    L->handler = L->guards[g - 1].outer;
+    go_new(L);
+}
+
+void lxl_guard_close(lxl *L, uint32_t g)
+{
+    if (!g)
+        return;
+    struct lxl_guard G = L->guards[g - 1];
+    limba_ssa_seal(L->ssa, G.pad);
+    limba_id cur = L->cur, handler = L->handler;
+    L->cur = G.pad;
+    L->handler = G.outer;
+    if (G.t)
+        lxl_rc(L, LIMBA_OP_RELEASE, G.p, G.t, G.n);
+    limba_id p = G.p;
+    lxl_rt(L, LIMBA_RT_MEM_FREE, LIMBA_T_VOID, &p, 1);
+    limba_ssa_raise(L->ssa, L->cur, G.pp[0], G.pp[1], G.pp[2]);
+    L->cur = cur;
+    L->handler = handler;
+}
+
+void lxl_guard_end(lxl *L, uint32_t g)
+{
+    lxl_guard_leave(L, g);
+    lxl_guard_close(L, g);
 }
 
 /* ---- raise ---- */

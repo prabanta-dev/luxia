@@ -210,13 +210,15 @@ void lxs_exc_try(limba_lxs *S, uint32_t node, uint32_t scope)
     if (lxs_no_handlers(S, node))
         lxs_error(S, LXE_NO_HANDLERS, node,
                   "pragma restrictions(no_handlers) forbids try");
-    /* a try of the library: an error only if the program, under the
-       restriction, reaches it (§ 10.4, lxs_unit_warnings) */
-    if (S->nunits && S->units[lxs_unit_at(S, node)].library) {
+    /* where the tries are: the routines under a handler start from them
+       (lxs_exc_handled); one of the library is an error only if the
+       program, under the restriction, reaches it (§ 10.4) */
+    if (S->nunits) {
         if (S->who & LXS_INIT) {
             limba_lxs_unit *u = &S->units[S->who & ~LXS_INIT];
             if (!u->try_node)
                 u->try_node = node;
+            S->main_handled = true;
         } else if (S->who) {
             if (S->who >= S->ntry_at) {
                 uint32_t n = S->who + 64;
@@ -283,6 +285,62 @@ void lxs_exc_raise(limba_lxs *S, uint32_t node, uint32_t scope)
     if (msg) {
         lxs_expr(S, msg, scope, S->ts.string);
         lxs_assign_to(S, msg, S->ts.string, "the message");
+    }
+}
+
+/* a routine and its heading in an interface are one */
+static limba_sym canon(const limba_lxs *S, limba_sym s)
+{
+    uint32_t h = lxs_heading(S, s);
+    return h ? h : s;
+}
+
+bool lxs_exc_handled_is(const limba_lxs *S, limba_sym s)
+{
+    return S->handled && S->handled[canon(S, s)];
+}
+
+void lxs_exc_handled(limba_lxs *S)
+{
+    uint32_t ns = S->st.nsym + 1;
+    bool any = S->main_handled;
+    for (limba_sym x = 1; x < S->ntry_at && x < ns; x++)
+        any |= S->try_at[x] != 0;
+    S->any_try = any;
+    if (!any)
+        return;
+    S->handled = limba_xcalloc(ns, 1);
+    for (limba_sym x = 1; x < S->ntry_at && x < ns; x++)
+        if (S->try_at[x])
+            S->handled[canon(S, x)] = 1;
+    /* what they call, through all calls; a call through a value reaches
+       every routine taken as a value (wider than Limba's set, which goes
+       by signature: never narrower, or an array would be lost) */
+    for (bool changed = true; changed;) {
+        changed = false;
+        for (uint32_t i = 0; i < S->nuses; i++) {
+            const limba_lxs_use *u = &S->uses[i];
+            bool from = u->who & LXS_INIT ? S->main_handled
+                                          : S->handled[canon(S, u->who)];
+            if (!from || u->taken ||
+                S->st.sym[u->what].kind != LIMBA_LSYM_ROUTINE ||
+                S->handled[canon(S, u->what)])
+                continue;
+            S->handled[canon(S, u->what)] = 1;
+            changed = true;
+        }
+        for (uint32_t i = 0; i < S->nicalls; i++) {
+            uint32_t w = S->icalls[i].who;
+            bool from =
+                w & LXS_INIT ? S->main_handled : S->handled[canon(S, w)];
+            for (uint32_t k = 0; from && k < S->nptaken; k++) {
+                limba_sym r = canon(S, S->ptaken[k].routine);
+                if (!S->handled[r]) {
+                    S->handled[r] = 1;
+                    changed = true;
+                }
+            }
+        }
     }
 }
 

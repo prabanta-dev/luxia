@@ -1,0 +1,66 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+// Arrays with computed bounds and the temporaries of the heap, freed
+// when an exception leaves them (§ 3.7, § 7.9; D157).
+program exc_arrays;
+type ParseError = exception;
+var rounds: Int32 := 0;
+
+procedure Parse(n: Int64);
+var buf: array[Int64 range 1..n] of String;
+begin
+  for var i: Int64 := 1 to n do
+    buf[i] := "x" & str(i);
+  end;
+  if n mod 2 = 0 then
+    raise ParseError with buf[n];
+  end;
+  var more: array[Int64 range 1..n] of Int32;
+  more[1] := 1;
+  if n = 3 then
+    var k: Int64 := n + 1;
+    more[k] := 2;
+  end;
+end Parse;
+
+function Total(n: Int64): Int64;
+var a: array[Int64 range 1..n] of Int64;
+begin
+  try
+    a[1] := 5;
+    return a[1] + n;
+  finally
+    rounds := rounds + 1;
+  end;
+end Total;
+
+begin
+  for var n: Int64 := 1 to 6 do
+    try
+      Parse(n);
+      writeln("ok ", n);
+    except
+      when ParseError var e:
+        writeln("parse ", e.message);
+      when IndexError var e:
+        writeln("index ", n);
+    end;
+  end;
+  writeln(Total(4), " ", rounds);
+  for var n: Int64 := 1 to 3 do
+    var c: array[Int64 range 1..n] of String;
+    try
+      c[1] := "y";
+      if n = 2 then
+        continue;
+      end;
+      var d: array[Int64 range 1..n] of String := {else "z"};
+      if n = 3 then
+        raise ParseError;
+      end;
+    except
+      else
+        writeln("else ", n, " ", c[1]);
+    end;
+  end;
+end exc_arrays.

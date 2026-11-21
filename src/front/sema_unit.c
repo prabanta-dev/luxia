@@ -1075,6 +1075,9 @@ static void library_try(limba_lxs *S, const uint32_t *first, uint32_t ns)
         if (!first[x] || !S->try_at[x] ||
             S->st.sym[x].kind != LIMBA_LSYM_ROUTINE)
             continue;
+        bool impl;
+        if (!S->units[lxs_unit_of(S, S->st.sym[x].scope, &impl)].library)
+            continue;
         char chain[600];
         size_t n;
         const char *sp = lxs_spell(S, x, &n);

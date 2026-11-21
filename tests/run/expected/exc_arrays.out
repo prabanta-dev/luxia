@@ -1,0 +1,8 @@
+ok 1
+parse x2
+index 3
+parse x4
+ok 5
+parse x6
+9 1
+else 3 y

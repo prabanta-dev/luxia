@@ -11,9 +11,13 @@
   a branch is a switch on the identity, a `finally` is copied on every
   way out and a pad runs it before raising again; a variable assigned in
   a `try` and read after it lives in a slot, its definite assignment
-  followed. Programs without `try` give the same IR as before. Next: an
-  array with computed bounds is not yet freed when an exception leaves
-  its statements; that comes with the following work (decided).
+  followed. Programs without `try` give the same IR as before.
+- An array with computed bounds, and a block of the heap a comparison or
+  an aggregate makes for a while, is freed when an exception leaves it:
+  a pad frees it and raises again, made only in the routines an
+  exception may cross on its way to a handler (computed on the tree,
+  never fewer than Limba's set, checked by the tests). Programs without
+  `try` give the same IR as before.
 - An error at run time no handler takes is reported with the name of its
   exception: `luxia: IndexError: index out of range at prog.luxia:12:5`.
   Every module carries the table of the predefined exceptions.

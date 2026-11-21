@@ -432,6 +432,8 @@ static void free_dyns(lxl *L, uint32_t n)
 {
     for (uint32_t i = L->ndyns; i-- > n;) {
         const lxl_store *st = &L->store[L->dyns[i]];
+        /* what follows is no longer under its pad (no second free) */
+        lxl_guard_leave(L, st->guard);
         limba_id a = st->addr;
         lxl_rc(L, LIMBA_OP_RELEASE, a,
                lxl_cell_type(L, L->S->st.sym[L->dyns[i]].type), st->count);
@@ -575,6 +577,10 @@ static void dynamic(lxl *L, limba_sym s, uint32_t tnode)
     st->addr = lxl_rt(L, LIMBA_RT_MEM_ALLOC, LIMBA_T_PTR, &bytes, 1);
     uint32_t o5[3] = {st->addr, lxl_iconst(L, LIMBA_T_I8, 0), bytes};
     lxl_emit(L, LIMBA_OP_MEMSET, LIMBA_T_VOID, 0, 0, 0, o5, 3);
+    /* freed if an exception leaves, from here (D157): its cells are
+       zero, what releasing them does nothing to */
+    st->guard =
+        lxl_guard_begin(L, st->addr, lxl_holds_str(L, cell) ? cell : 0, n);
     if (lxl_has_narrow(L, cell))
         lxl_fill_dyn(L, st->addr, bytes, cell);
     (void)it;
@@ -920,12 +926,14 @@ static void exit_stmt(lxl *L, uint32_t node, bool exit)
     const lxl_loop *lp = &L->loops[L->nloops - 1];
     limba_id target = exit ? lp->exit : lp->cont;
     uint32_t keep = lp->ndyn, ntrys = lp->ntrys, ndyns = L->ndyns;
+    limba_id handler = L->handler;
     if (!cond) {
         /* the finally of the try statements left run first (§ 7.9) */
         lxl_leave_trys(L, ntrys);
         free_dyns(L, keep);
         L->ndyns = ndyns;
         limba_ssa_br(L->ssa, L->cur, target);
+        L->handler = handler;
         dead_end(L);
         return;
     }
@@ -940,6 +948,7 @@ static void exit_stmt(lxl *L, uint32_t node, bool exit)
         free_dyns(L, keep);
         L->ndyns = ndyns;
         limba_ssa_br(L->ssa, L->cur, target);
+        L->handler = handler;
     } else {
         lxl_branch(L, cond, target, go_on);
     }
@@ -964,11 +973,13 @@ static void return_stmt(lxl *L, uint32_t node)
     /* the finally around run after the value, before the out
        parameters go back (§ 7.9, § 8.1) */
     uint32_t ndyns = L->ndyns;
+    limba_id handler = L->handler;
     lxl_leave_trys(L, 0);
     store_outs(L, node);
     free_dyns(L, 0);
     L->ndyns = ndyns;
     limba_ssa_ret(L->ssa, L->cur, v);
+    L->handler = handler;
     dead_end(L);
 }
 
@@ -1053,6 +1064,19 @@ static void pragmas(lxl *L, uint32_t list)
             pragma(L, list_at(L, list, i));
 }
 
+/* the pads of the computed arrays from the n-th on, innermost first;
+   the code after them under the handler there was before them */
+static void close_guards(lxl *L, uint32_t n)
+{
+    for (uint32_t i = L->ndyns; i-- > n;) {
+        uint32_t g = L->store[L->dyns[i]].guard;
+        if (!g)
+            continue;
+        lxl_guard_close(L, g);
+        L->handler = L->guards[g - 1].outer;
+    }
+}
+
 void lxl_stmts(lxl *L, uint32_t list)
 {
     stmts(L, list);
@@ -1068,6 +1092,7 @@ static void stmts(lxl *L, uint32_t list)
     if (L->ndyns > keep) {
         if (!limba_ssa_terminated(L->ssa, L->cur))
             free_dyns(L, keep);
+        close_guards(L, keep);
         L->ndyns = keep;
     }
 }
@@ -1250,7 +1275,10 @@ static void begin_function(lxl *L, limba_id fid)
     L->routine_sym = 0;
     L->nrplace = 0;
     L->handler = LIMBA_NONE;
-    L->ntrys = L->noccs = L->nshadowed = 0;
+    L->ntrys = L->noccs = L->nshadowed = L->nguards = 0;
+    /* until the caller says: a function the generator makes itself is
+       under a handler when the program has a try (wider, never less) */
+    L->fn_handled = L->S->any_try;
     if (L->capvia)
         memset(L->via, 0xff, (size_t)L->capvia * sizeof(*L->via));
 }
@@ -1298,6 +1326,17 @@ static void end_function(lxl *L, uint32_t node, bool function)
             limba_ssa_ret(L->ssa, L->cur, LIMBA_NONE);
         }
     }
+    close_guards(L, 0);
+    L->ndyns = 0;
+    /* for the tests: which functions were taken to be under a handler */
+    limba_lxs *S = L->S;
+    if (L->fid >= S->nfn_handled) {
+        uint32_t n = L->fid + 64;
+        S->fn_handled = limba_xrealloc(S->fn_handled, n, 1);
+        memset(S->fn_handled + S->nfn_handled, 0, n - S->nfn_handled);
+        S->nfn_handled = n;
+    }
+    S->fn_handled[L->fid] = L->fn_handled;
     /* the jumps belong to no single place */
     limba_ssa_func(L->ssa)->pos_cur = 0;
     limba_edit e;
@@ -1325,6 +1364,7 @@ static void routine_body(lxl *L, limba_sym s)
     const limba_typeinfo *sig = ti(L, y->type);
     L->result = sig->elem == S->ts.void_ ? 0 : sig->elem;
     begin_function(L, L->func_of[s]);
+    L->fn_handled = lxs_exc_handled_is(S, s);
     unsigned file = L->suppress;
     pragmas(L, locals); /* for the whole routine */
     limba_func *f = limba_ssa_func(L->ssa);
@@ -1789,6 +1829,7 @@ limba_module *limba_lxl_program_each(limba_lxs *S,
        program's body last */
     L->result = 0;
     begin_function(L, main_fid);
+    L->fn_handled = S->main_handled;
     for (uint32_t i = 0; i < S->ntconsts; i++) {
         const limba_lx_node *x = nd(L, S->tconsts[i]);
         limba_sym s = S->sym[x->a];
@@ -1855,6 +1896,7 @@ done:
     free(L->occs);
     free(L->shadowed);
     free(L->idents);
+    free(L->guards);
     free(L->func_of);
     free(L->tmap);
     free(L->loops);

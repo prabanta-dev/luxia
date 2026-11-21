@@ -1671,6 +1671,7 @@ static limba_id compare_multi(lxl *L, uint32_t node, limba_ltype ft)
     limba_ltype et = ti(L, ft)->elem;
     limba_id *len = limba_xmalloc(2 * dims * sizeof(*len));
     limba_id a, na, b, nb, heap = LIMBA_NONE;
+    uint32_t guard = 0;
     multi_operand(L, l, node, &a, &na, len, dims);
     if (runs_code(L, r)) {
         /* the cells of l now: what r runs comes after it (§ 6.7) */
@@ -1685,6 +1686,8 @@ static limba_id compare_multi(lxl *L, uint32_t node, limba_ltype ft)
         uint32_t o[3] = {heap, a, bytes};
         lxl_emit(L, LIMBA_OP_MEMCPY, LIMBA_T_VOID, 0, 0, 0, o, 3);
         a = heap;
+        /* what r runs may raise: then the copy goes (D157) */
+        guard = lxl_guard_begin(L, heap, lxl_holds_str(L, et) ? et : 0, na);
     }
     multi_operand(L, r, node, &b, &nb, len + dims, dims);
     lxl_at(L, node);
@@ -1704,6 +1707,7 @@ static limba_id compare_multi(lxl *L, uint32_t node, limba_ltype ft)
     limba_id st = L->dry ? lxl_iconst(L, LIMBA_T_I32, EQ_SAME)
                          : eq_call(L, ft, a, na, b, nb);
     if (heap != LIMBA_NONE) {
+        lxl_guard_end(L, guard);
         lxl_rc(L, LIMBA_OP_RELEASE, heap, et, na);
         lxl_rt(L, LIMBA_RT_MEM_FREE, LIMBA_T_VOID, &heap, 1);
     }
@@ -1723,6 +1727,7 @@ static limba_id compare_whole(lxl *L, uint32_t node)
     uint32_t l = x->a, r = x->b;
     limba_ltype lt = ntype(L, l);
     limba_id a, na, b, nb, heap = LIMBA_NONE;
+    uint32_t guard = 0;
     whole_operand(L, l, node, &a, &na);
     unsigned lk = nd(L, l)->kind;
     if (lk != LXN_CALL && lk != LXN_AGG && runs_code(L, r)) {
@@ -1745,6 +1750,7 @@ static limba_id compare_whole(lxl *L, uint32_t node)
             uint32_t o[3] = {heap, a, bytes};
             lxl_emit(L, LIMBA_OP_MEMCPY, LIMBA_T_VOID, 0, 0, 0, o, 3);
             a = heap;
+            guard = lxl_guard_begin(L, heap, lxl_holds_str(L, et) ? et : 0, na);
         } else {
             limba_id copy = lxl_temp(L, lt, node);
             lxl_copy(L, copy, a, lt);
@@ -1758,6 +1764,7 @@ static limba_id compare_whole(lxl *L, uint32_t node)
     limba_id st = L->dry ? lxl_iconst(L, LIMBA_T_I32, EQ_SAME)
                          : eq_call(L, lt, a, na, b, nb);
     if (heap != LIMBA_NONE) {
+        lxl_guard_end(L, guard);
         lxl_rc(L, LIMBA_OP_RELEASE, heap, ti(L, lt)->elem, na);
         lxl_rt(L, LIMBA_RT_MEM_FREE, LIMBA_T_VOID, &heap, 1);
     }
@@ -2059,7 +2066,11 @@ void lxl_assign(lxl *L, uint32_t node, uint32_t target, uint32_t value)
         limba_id tmp = lxl_rt(L, LIMBA_RT_MEM_ALLOC, LIMBA_T_PTR, &bytes, 1);
         uint32_t z[3] = {tmp, lxl_iconst(L, LIMBA_T_I8, 0), bytes};
         lxl_emit(L, LIMBA_OP_MEMSET, LIMBA_T_VOID, 0, 0, 0, z, 3);
+        /* what the aggregate runs may raise: then the block goes (D157) */
+        uint32_t guard =
+            lxl_guard_begin(L, tmp, lxl_holds_str(L, et) ? et : 0, n);
         lxl_agg_fill_dyn(L, value, tmp, t, lo, hi);
+        lxl_guard_end(L, guard);
         lxl_live(L, st->addr);
         lxl_rc(L, LIMBA_OP_RELEASE, st->addr, et, n);
         uint32_t m[3] = {st->addr, tmp, bytes};

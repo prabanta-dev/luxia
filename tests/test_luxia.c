@@ -2252,6 +2252,123 @@ static const run_case
             /* exceptions (§ 3.16, § 7.9): a finally on every way out,
                definite assignment through a handler and a finally, StorageError
                taken by none, halt without finally, a String kept in a slot */
+            /* arrays with computed bounds and the temporaries of the heap
+               freed when an exception leaves them (D157): no block left */
+            {"program p;\n"
+             "type ParseError = exception;\n"
+             "var rounds: Int32 := 0;\n"
+             "\n"
+             "procedure Parse(n: Int64);\n"
+             "var buf: array[Int64 range 1..n] of String;\n"
+             "begin\n"
+             "  for var i: Int64 := 1 to n do\n"
+             "    buf[i] := \"x\" & str(i);\n"
+             "  end;\n"
+             "  if n mod 2 = 0 then\n"
+             "    raise ParseError with buf[n];\n"
+             "  end;\n"
+             "  var more: array[Int64 range 1..n] of Int32;\n"
+             "  more[1] := 1;\n"
+             "  if n = 3 then\n"
+             "    var k: Int64 := n + 1;\n"
+             "    more[k] := 2;\n"
+             "  end;\n"
+             "end Parse;\n"
+             "\n"
+             "function Total(n: Int64): Int64;\n"
+             "var a: array[Int64 range 1..n] of Int64;\n"
+             "begin\n"
+             "  try\n"
+             "    a[1] := 5;\n"
+             "    return a[1] + n;\n"
+             "  finally\n"
+             "    rounds := rounds + 1;\n"
+             "  end;\n"
+             "end Total;\n"
+             "\n"
+             "begin\n"
+             "  for var n: Int64 := 1 to 6 do\n"
+             "    try\n"
+             "      Parse(n);\n"
+             "      writeln(\"ok \", n);\n"
+             "    except\n"
+             "      when ParseError var e:\n"
+             "        writeln(\"parse \", e.message);\n"
+             "      when IndexError var e:\n"
+             "        writeln(\"index \", n);\n"
+             "    end;\n"
+             "  end;\n"
+             "  writeln(Total(4), \" \", rounds);\n"
+             "  for var n: Int64 := 1 to 3 do\n"
+             "    var c: array[Int64 range 1..n] of String;\n"
+             "    try\n"
+             "      c[1] := \"y\";\n"
+             "      if n = 2 then\n"
+             "        continue;\n"
+             "      end;\n"
+             "      var d: array[Int64 range 1..n] of String := {else \"z\"};\n"
+             "      if n = 3 then\n"
+             "        raise ParseError;\n"
+             "      end;\n"
+             "    except\n"
+             "      else\n"
+             "        writeln(\"else \", n, \" \", c[1]);\n"
+             "    end;\n"
+             "  end;\n"
+             "end.\n",
+             "ok 1\nparse x2\nindex 3\nparse x4\nok 5\nparse x6\n9 1\nelse 3 y\n", "ok"},
+            {"program p;\n"
+             "type E = exception;\n"
+             "var calls: Int32 := 0;\n"
+             "function Pick(k: Int64): Int64;\n"
+             "begin\n"
+             "  calls := calls + 1;\n"
+             "  if k > 2 then raise E with \"pick\"; end;\n"
+             "  return k;\n"
+             "end Pick;\n"
+             "\n"
+             "function Same(n: Int64): Boolean;\n"
+             "var a: array[Int64 range 1..n] of String := {else \"s\"};\n"
+             "var b: array[Int64 range 1..n] of String := {else \"s\"};\n"
+             "begin\n"
+             "  return a = {\"s\", str(Pick(n))};\n"
+             "end Same;\n"
+             "\n"
+             "procedure Fill(n: Int64);\n"
+             "var a: array[Int64 range 1..n] of String;\n"
+             "begin\n"
+             "  a := {else str(Pick(n))};\n"
+             "end Fill;\n"
+             "\n"
+             "procedure Grid(n: Int64);\n"
+             "var g: array[Int64 range 1..n, Int64 range 1..2] of Int32;\n"
+             "var h: array[Int64 range 1..n, Int64 range 1..2] of Int32;\n"
+             "begin\n"
+             "  if g = h then\n"
+             "    writeln(\"grid same\");\n"
+             "  end;\n"
+             "end Grid;\n"
+             "\n"
+             "begin\n"
+             "  for var n: Int64 := 2 to 3 do\n"
+             "    try\n"
+             "      writeln(Same(n));\n"
+             "    except\n"
+             "      when E var e:\n"
+             "        writeln(\"same \", n, \" \", e.message);\n"
+             "    end;\n"
+             "    try\n"
+             "      Fill(n);\n"
+             "      writeln(\"filled \", n);\n"
+             "    except\n"
+             "      when E:\n"
+             "        writeln(\"fill \", n);\n"
+             "    end;\n"
+             "  end;\n"
+             "  Grid(2);\n"
+             "  writeln(calls);\n"
+             "end.\n",
+             "false\nfilled 2\nsame 3 pick\nfill 3\ngrid same\n4\n", "ok"},
             {"program p;\n"
              "type E = exception;\n"
              "function F(k: Int32): Int32;\n"
@@ -2540,8 +2657,21 @@ static char *compile_run(const char *src, const char *in, size_t inlen,
         }
     } else {
         limba_diag d = {{0}, 0};
+        /* the routines under a handler, as Luxia computes them on the
+           tree, are never fewer than Limba's set (D157): else a block of
+           the heap would be lost on an exception taken */
+        uint32_t narrower = UINT32_MAX;
+        for (uint32_t k = 0; k < m->nfuncs && narrower == UINT32_MAX; k++)
+            if (limba_module_handled(m, k) &&
+                !(k < sema.nfn_handled && sema.fn_handled[k]))
+                narrower = k;
         if (limba_verify(m, &d) != 0) {
             snprintf(end, size, "invalid IR: %.200s", d.msg);
+        } else if (narrower != UINT32_MAX) {
+            size_t fn = 0;
+            const char *name = limba_str(m, m->funcs[narrower].name, &fn);
+            snprintf(end, size, "under a handler for Limba, not for Luxia: %.*s",
+                     (int)fn, name);
         } else {
             out = run_module(m, in, inlen, argc, argv, end, size, &n1);
             char end2[256];
