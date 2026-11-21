@@ -9,8 +9,9 @@
  * Boolean, Float32 and Float64, Char and String, arrays (open and with
  * computed bounds too), records, pointers, exact constants, routines
  * with in, var and out parameters and results of every kind, the
- * statements of Luxia 0 and much of its library; the run-time errors
- * stop the program where they happen. Not public.
+ * statements of Luxia 0 and much of its library, exceptions raised and
+ * taken with finally; an error no branch takes stops the program where
+ * it happens. Not public.
  */
 #ifndef LIMBA_LUXIA_GEN_H
 #define LIMBA_LUXIA_GEN_H

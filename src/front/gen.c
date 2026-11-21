@@ -36,6 +36,17 @@
  * through (102 for nil, checked before the arguments), compared and
  * given new values; only procedures and the program call through them,
  * and only functions are values, so no call through a value comes back.
+ *
+ * Exceptions (§ 3.16, § 7.9): the program declares some, children of
+ * others; procedures and the program have try statements with branches
+ * naming each identity once (no family before a child of it), else or
+ * when var vN:, a finally that no jump leaves, raise with and without a
+ * message, raise; in a branch, and jumps through a finally; some
+ * statements of the program are each in a try that prints what it took,
+ * so that the run goes on after an error. The run takes an error at the
+ * innermost try whose branch names it or a family of it, runs every
+ * finally on the way out (not after halt), and a block made by new and
+ * lost by an error stays alive, as in every engine.
  */
 #include "gen.h"
 
@@ -268,9 +279,11 @@ enum {
     E_ICALL,  /* a call through the procedural variable var (op 0), or the
                  element lit of the table var (op 1) of group fn: args by
                  position (§ 3.15) */
-    E_PVAL    /* a value of procedural type t: routine fn (op 0), nil (1),
+    E_PVAL,   /* a value of procedural type t: routine fn (op 0), nil (1),
                  variable var (2), var converted to t (3), element lit of
                  the table var (4) */
+    E_OCC     /* the name (op 0) or the message (1) of the occurrence var
+                 of a branch of except (§ 3.16) */
 };
 
 /* a call of a function whose result is a record or an array has in var
@@ -336,7 +349,14 @@ enum {
        its total by the open parameter; mat[fld] holds the numbers */
     S_MAT,
     /* the nested routine var (0 or 1) of routine fn called (§ 8.9) */
-    S_NCALL
+    S_NCALL,
+    /* exceptions (§ 3.16, § 7.9): try blk, branches arm (the identities
+       of each in lab, its occurrence variable + 1 in cond), else alt
+       (when var vN: instead if occ, its variable + 1), finally fin; raise
+       of identity fn with the String e (0: none); raise; in a branch */
+    S_TRY,
+    S_RAISE,
+    S_RERAISE
 };
 
 typedef struct {
@@ -354,6 +374,9 @@ typedef struct {
     bool named;           /* S_CALL: as in xe */
     uint8_t npos;
     uint32_t pmap;
+    uint32_t fin, nfin; /* S_TRY: the finally, if has_fin */
+    bool has_fin;
+    uint32_t occ; /* S_TRY: the variable of when var vN: + 1, 0 for else */
 } xs;
 
 typedef struct {
@@ -497,6 +520,11 @@ typedef struct {
     uint32_t nmat, capmat;
     xproc *pr;
     uint32_t npr, cappr;
+    /* the exceptions of the program (§ 3.16), e0..: the parent of each,
+       -1 for none; in a finally (no jump may leave it: L0110) */
+    uint32_t nexc;
+    int xpar[4];
+    bool in_fin;
 } G;
 
 static uint32_t new_str(G *g, const char *b, size_t n)
@@ -926,6 +954,76 @@ static uint32_t binop(G *g, unsigned op, uint32_t t, uint32_t a, uint32_t b)
     g->e[i].a = a;
     g->e[i].b = b;
     return i;
+}
+
+/* ---- exceptions (§ 3.16, § 10.1) ---- */
+
+/* the predefined exceptions: the identity, the name, the family (0 for a
+   family), the text of its error; 106 and 107 have no name of their own,
+   their family's */
+static const struct {
+    int id;
+    const char *name;
+    int family;
+    const char *text;
+} xpre[] = {
+    {900, "ConstraintError", 0, ""},
+    {6, "OverflowError", 900, "overflow"},
+    {11, "DivisionError", 900, "division by zero"},
+    {100, "IndexError", 900, "index out of range"},
+    {101, "RangeError", 900, "value out of range"},
+    {102, "NilError", 900, "nil dereferenced"},
+    {103, "ConversionError", 900, "conversion out of range"},
+    {104, "ShiftError", 900, "shift count out of range"},
+    {105, "DanglingError", 900, "dangling pointer"},
+    {108, "LengthError", 900, "length mismatch"},
+    {902, "ProgramError", 0, ""},
+    {106, "ProgramError", 902, "invalid dispose"},
+    {903, "InputOutputError", 0, ""},
+    {107, "InputOutputError", 903, "input/output error"},
+};
+
+#define NXPRE (sizeof(xpre) / sizeof(xpre[0]))
+
+static int exc_parent(const G *g, int id)
+{
+    if (id >= 1000)
+        return g->xpar[id - 1000] < 0 ? 0 : 1000 + g->xpar[id - 1000];
+    for (unsigned k = 0; k < NXPRE; k++)
+        if (xpre[k].id == id)
+            return xpre[k].family;
+    return 0;
+}
+
+/* is identity id f or one of its children */
+static bool exc_within(const G *g, int id, int f)
+{
+    for (; id; id = exc_parent(g, id))
+        if (id == f)
+            return true;
+    return false;
+}
+
+/* what e.name gives for identity id, and the text of its error */
+static const char *exc_name(const G *g, int id, char *buf, size_t size)
+{
+    (void)g;
+    if (id >= 1000) {
+        snprintf(buf, size, "e%d", id - 1000);
+        return buf;
+    }
+    for (unsigned k = 0; k < NXPRE; k++)
+        if (xpre[k].id == id)
+            return xpre[k].name;
+    return "";
+}
+
+static const char *exc_text(int id)
+{
+    for (unsigned k = 0; k < NXPRE; k++)
+        if (xpre[k].id == id)
+            return xpre[k].text;
+    return "";
 }
 
 static bool in_function(const G *g)
@@ -3619,6 +3717,198 @@ static uint32_t matrix(G *g, uint32_t *out)
     return 1;
 }
 
+/* an identity a branch names: an exception of the program, a family,
+   or a predefined one the runs raise most */
+static int pick_exc(G *g)
+{
+    static const int ids[] = {900, 101, 100, 6,   11,  103,
+                              104, 102, 105, 902, 108, 903};
+    if (g->nexc && chance(g, 40))
+        return 1000 + (int)below(g, g->nexc);
+    return ids[below(g, sizeof(ids) / sizeof(ids[0]))];
+}
+
+/* raise E [with s] (§ 7.9): an exception of the program, a predefined
+   one (without with: the text of its error), a family with a message */
+static uint32_t raise_stmt(G *g, int id)
+{
+    static const int ids[] = {101, 100, 6, 11, 103, 108, 900, 902};
+    uint32_t s = new_s(g, S_RAISE);
+    if (id < 0 || id == 903)
+        id = g->nexc && chance(g, 60)
+                 ? 1000 + (int)below(g, g->nexc)
+                 : ids[below(g, sizeof(ids) / sizeof(ids[0]))];
+    g->st[s].fn = (uint32_t)id;
+    if (id == 900 || id == 902 || chance(g, 60))
+        g->st[s].e = value_for(g, T_STR, depth(g));
+    return s;
+}
+
+/* the last statement of a block ends it: nothing may follow */
+static bool ends_block(const G *g, uint32_t b, uint32_t n)
+{
+    if (!n)
+        return false;
+    const xs *l = &g->st[g->ls[b + n - 1]];
+    return (l->k == S_EXIT || l->k == S_CONT)
+               ? !l->e
+               : l->k == S_RETURN || l->k == S_RAISE || l->k == S_RERAISE;
+}
+
+/* writeln(vN.name, " ", vN.message) of occurrence variable occ - 1 */
+static uint32_t occ_write(G *g, uint32_t occ)
+{
+    uint32_t items[3];
+    items[0] = new_e(g, E_OCC, T_STR);
+    g->e[items[0]].var = occ - 1;
+    items[1] = new_e(g, E_STR, 0);
+    items[2] = new_e(g, E_OCC, T_STR);
+    g->e[items[2]].var = occ - 1;
+    g->e[items[2]].op = 1;
+    uint32_t w = new_s(g, S_WRITE);
+    g->st[w].args = keep_list(g, items, 3);
+    g->st[w].nargs = 3;
+    return w;
+}
+
+/* the body of a branch of except: its occurrence (variable occ, + 1;
+   0 for none) printed first, sometimes raise; last */
+static uint32_t branch_block(G *g, uint32_t occ, uint32_t *n)
+{
+    uint32_t mark = g->nscope;
+    uint32_t b = block(g, (int)below(g, 3), n);
+    g->nscope = mark;
+    if (occ)
+        append(g, &b, n, occ_write(g, occ), true);
+    if (chance(g, 12) && !ends_block(g, b, *n))
+        append(g, &b, n, new_s(g, S_RERAISE), false);
+    return b;
+}
+
+/* try (§ 7.9): a body, branches of except naming each identity once, no
+   family before a child of it nor with it, then else or when var vN:,
+   or a finally, or both */
+static uint32_t jump(G *g);
+
+static uint32_t try_stmt(G *g)
+{
+    uint32_t s = new_s(g, S_TRY);
+    uint32_t mark = g->nscope, n;
+    uint32_t b = block(g, 1 + (int)below(g, 3), &n);
+    g->nscope = mark;
+    unsigned form = below(g, 10); /* except, finally, both */
+    /* a jump out of it, through its finally */
+    if (form >= 6 && chance(g, 40) && !ends_block(g, b, n) &&
+        (g->loops || (g->cur >= 0 && !g->in_fin)))
+        append(g, &b, &n, jump(g), false);
+    g->st[s].blk = b;
+    g->st[s].nblk = n;
+    if (form < 6 || form >= 8) {
+        int used[8];
+        uint32_t nused = 0, na = 0, nl = 0;
+        xarm arms[3];
+        xlab labs[8];
+        for (uint32_t i = 0, want = below(g, 4); i < want; i++) {
+            uint32_t first = nl;
+            for (uint32_t k = 0, m = 1 + below(g, 2); k < m && nl < 8; k++) {
+                int id = pick_exc(g);
+                bool bad = false;
+                for (uint32_t j = 0; j < nused && !bad; j++)
+                    bad = used[j] == id || exc_within(g, id, used[j]);
+                for (uint32_t j = first; j < nl && !bad; j++)
+                    bad = labs[j].lo == id ||
+                          exc_within(g, (int)labs[j].lo, id) ||
+                          exc_within(g, id, (int)labs[j].lo);
+                if (!bad)
+                    labs[nl++] = (xlab){id, id};
+            }
+            if (nl == first)
+                continue;
+            for (uint32_t j = first; j < nl; j++)
+                used[nused++] = (int)labs[j].lo;
+            arms[na].lab = first;
+            arms[na].nlab = nl - first;
+            arms[na].cond = chance(g, 75) ? new_v(g, T_STR, V_LOCAL) + 1 : 0;
+            arms[na].blk = branch_block(g, arms[na].cond, &arms[na].nblk);
+            na++;
+        }
+        /* often the body ends raising what a branch names */
+        if (chance(g, 50) && !ends_block(g, b, n)) {
+            int id = nl && chance(g, 70) ? (int)labs[below(g, nl)].lo : -1;
+            append(g, &b, &n, raise_stmt(g, id), false);
+            g->st[s].blk = b;
+            g->st[s].nblk = n;
+        }
+        uint32_t base_lab = g->nlab;
+        for (uint32_t i = 0; i < nl; i++) {
+            LIMBA_GROW(g->lab, g->nlab, g->caplab);
+            g->lab[g->nlab++] = labs[i];
+        }
+        g->st[s].arm = g->narm;
+        g->st[s].narm = na;
+        for (uint32_t i = 0; i < na; i++) {
+            arms[i].lab += base_lab;
+            LIMBA_GROW(g->arm, g->narm, g->caparm);
+            g->arm[g->narm++] = arms[i];
+        }
+        /* a branch at least: else, or when var vN: */
+        if (!na || chance(g, 60)) {
+            uint32_t occ = chance(g, 60) ? new_v(g, T_STR, V_LOCAL) + 1 : 0;
+            uint32_t nb;
+            uint32_t ab = branch_block(g, occ, &nb);
+            g->st[s].alt = ab;
+            g->st[s].nalt = nb;
+            g->st[s].has_alt = true;
+            g->st[s].occ = occ;
+        }
+    }
+    if (form >= 6) {
+        /* no jump leaves it: the loops around it are not its own */
+        int loops = g->loops;
+        bool in_fin = g->in_fin;
+        g->loops = 0;
+        g->in_fin = true;
+        uint32_t nf;
+        uint32_t fb = block(g, 1 + (int)below(g, 2), &nf);
+        g->nscope = mark;
+        g->loops = loops;
+        g->in_fin = in_fin;
+        g->st[s].fin = fb;
+        g->st[s].nfin = nf;
+        g->st[s].has_fin = true;
+    }
+    return s;
+}
+
+/* some statements of the program, not declarations, each in a try that
+   prints what it takes: the run goes on after an error, with what the
+   error left (§ 7.9) */
+static void guard_main(G *g)
+{
+    if (!chance(g, 70))
+        return;
+    for (uint32_t i = 0; i < g->main_n; i++) {
+        uint32_t si = g->ls[g->main_blk + i];
+        unsigned k = g->st[si].k;
+        /* not one that declares what comes after it */
+        if (!(k == S_ASSIGN || k == S_IF || k == S_WHILE || k == S_REPEAT ||
+              k == S_FOR || k == S_CASE || k == S_WRITE || k == S_CALL ||
+              k == S_TRY || k == S_RAISE) ||
+            !chance(g, 45))
+            continue;
+        uint32_t t = new_s(g, S_TRY);
+        g->st[t].blk = keep_list(g, &si, 1);
+        g->st[t].nblk = 1;
+        uint32_t occ = new_v(g, T_STR, V_LOCAL) + 1;
+        uint32_t w = occ_write(g, occ);
+        g->st[t].alt = keep_list(g, &w, 1);
+        g->st[t].nalt = 1;
+        g->st[t].has_alt = true;
+        g->st[t].occ = occ;
+        g->ls[g->main_blk + i] = t;
+    }
+}
+
 static uint32_t stmt(G *g, uint32_t *out)
 {
     g->budget--;
@@ -3697,6 +3987,14 @@ static uint32_t stmt(G *g, uint32_t *out)
         /* halt(0), halt(k) for k in 2..255 but 141, or a computed status
            that may be outside */
         return halt_stmt(g, out);
+    }
+    if (!pure && deep && chance(g, 7)) {
+        out[0] = try_stmt(g);
+        return 1;
+    }
+    if (!pure && chance(g, 2)) {
+        out[0] = raise_stmt(g, -1);
+        return 1;
     }
     if (!pure && chance(g, 4))
         return str_loop(g, out);
@@ -4172,7 +4470,7 @@ static uint32_t read_write(G *g)
 /* a jump that ends a block: return, or exit or continue in a loop */
 static uint32_t jump(G *g)
 {
-    if (g->cur >= 0 && (!g->loops || chance(g, 50))) {
+    if (g->cur >= 0 && !g->in_fin && (!g->loops || chance(g, 50))) {
         uint32_t s = new_s(g, S_RETURN);
         uint32_t rt = g->r[g->cur].rt;
         if (g->r[g->cur].func) {
@@ -4197,7 +4495,8 @@ static uint32_t block(G *g, int n, uint32_t *count)
             x[nx++] = some[j];
         }
     }
-    if (g->nesting > 1 && (g->cur >= 0 || g->loops) && chance(g, 12)) {
+    if (g->nesting > 1 && (g->loops || (g->cur >= 0 && !g->in_fin)) &&
+        chance(g, 12)) {
         LIMBA_GROW(x, nx, cap);
         x[nx++] = jump(g);
     }
@@ -5009,6 +5308,10 @@ static void pexpr(G *g, text *o, uint32_t i)
             putf(o, "[%u]", (unsigned)x->lit);
         }
         break;
+    case E_OCC:
+        put_name(o, g, x->var);
+        put(o, x->op ? ".message" : ".name");
+        break;
     case E_IN:
         put(o, "(");
         pexpr(g, o, x->a);
@@ -5441,6 +5744,64 @@ static void pstmt(G *g, text *o, uint32_t si, int ind)
         pexpr(g, o, s.fld);
         put(o, s.k == S_RDB ? "));\n" : ");\n");
         break;
+    case S_TRY: {
+        char nb[16];
+        put(o, "try\n");
+        pblock(g, o, s.blk, s.nblk, ind + 1);
+        if (s.narm || s.has_alt) {
+            indent(o, ind);
+            put(o, "except\n");
+        }
+        for (uint32_t k = 0; k < s.narm; k++) {
+            const xarm *a = &g->arm[s.arm + k];
+            indent(o, ind + 1);
+            put(o, "when ");
+            for (uint32_t j = 0; j < a->nlab; j++) {
+                if (j)
+                    put(o, ", ");
+                put(o, exc_name(g, (int)g->lab[a->lab + j].lo, nb, sizeof(nb)));
+            }
+            if (a->cond) {
+                put(o, " var ");
+                put_name(o, g, a->cond - 1);
+            }
+            put(o, ":\n");
+            pblock(g, o, a->blk, a->nblk, ind + 2);
+        }
+        if (s.has_alt) {
+            indent(o, ind + 1);
+            if (s.occ) {
+                put(o, "when var ");
+                put_name(o, g, s.occ - 1);
+                put(o, ":\n");
+            } else {
+                put(o, "else\n");
+            }
+            pblock(g, o, s.alt, s.nalt, ind + 2);
+        }
+        if (s.has_fin) {
+            indent(o, ind);
+            put(o, "finally\n");
+            pblock(g, o, s.fin, s.nfin, ind + 1);
+        }
+        indent(o, ind);
+        put(o, "end;\n");
+        break;
+    }
+    case S_RAISE: {
+        char nb[16];
+        put(o, "raise ");
+        put(o, exc_name(g, (int)s.fn, nb, sizeof(nb)));
+        if (s.e) {
+            put(o, " with ");
+            pexpr(g, o, s.e);
+        }
+        put(o, ";\n");
+        break;
+    }
+    case S_RERAISE:
+        put(o, "raise;\n");
+        break;
     case S_HALT:
         put(o, "halt(");
         pexpr(g, o, s.e);
@@ -5819,11 +6180,17 @@ static void program(G *g, text *o, uint32_t nglob)
             pconst(g, o, g->gc[k]);
         }
     }
-    bool types = false;
+    bool types = g->nexc > 0;
     for (uint32_t t = NTYPES; t < g->nty; t++)
         types |= g->ty[t].k != K_DYN;
     if (types) {
         put(o, "\ntype\n");
+        for (uint32_t k = 0; k < g->nexc; k++) {
+            if (g->xpar[k] < 0)
+                putf(o, "  e%u = exception;\n", k);
+            else
+                putf(o, "  e%u = exception(e%d);\n", k, g->xpar[k]);
+        }
         for (uint32_t t = NTYPES; t < g->nty; t++) {
             const xt *x = &g->ty[t];
             if (x->k == K_DYN)
@@ -6108,6 +6475,19 @@ typedef struct {
     const char *in;
     size_t inlen, inpos;
     bool in_end;
+    /* the exception of the trap (§ 3.16): its message when raised with
+       one (else the text of its error); per occurrence variable its
+       identity; the exceptions the branches running took, for raise; */
+    v128 msg;
+    bool has_msg;
+    v128 *occ;
+    struct xhs {
+        int code;
+        uint32_t line, col;
+        v128 msg;
+        bool has_msg;
+    } hs[64];
+    uint32_t nhs;
 } X;
 
 static v128 wrap(unsigned t, v128 v)
@@ -6128,7 +6508,16 @@ static void stop(X *x, int code, uint32_t line, uint32_t col)
         x->code = code;
         x->line = line;
         x->col = col;
+        x->msg = 0;
+        x->has_msg = false;
     }
+}
+
+/* can a branch of except take the trap: not a halt, not StorageError
+   (§ 3.16), not the end of the generator's own budget */
+static bool catchable(const X *x)
+{
+    return x->trap && !x->halt && !x->toolong && x->code != 7 && x->code != 28;
 }
 
 static v128 fail(X *x, uint32_t at, int code)
@@ -6936,6 +7325,13 @@ static v128 ev(X *x, uint32_t i)
         default:
             return (v128)tab_value(g, e->var, (uint32_t)e->lit) + 1;
         }
+    case E_OCC: {
+        if (e->op)
+            return x->cell[x->ref[e->var]];
+        char nb[16];
+        const char *nm = exc_name(g, (int)x->occ[e->var], nb, sizeof(nb));
+        return run_str(x, nm, strlen(nm));
+    }
     case E_MATH: {
         /* in double, rounded to the type: what Float32 does too; the
            functions of Limba's library, the bits every engine gives
@@ -7423,7 +7819,9 @@ static int run_stmt(X *x, uint32_t si)
         return X_NEXT;
     case S_HNEW: {
         /* the elements without values (§ 3.11), then the pointer */
-        v128 lo = ev(x, s->e), hi = ev(x, s->e2);
+        v128 lo = ev(x, s->e), hi = x->trap ? 0 : ev(x, s->e2);
+        if (x->trap)
+            return X_RET; /* nothing made: a branch may go on */
         uint32_t el = g->ty[g->ty[g->v[s->var].t].elem].elem;
         uint32_t first = x->nhcell;
         for (v128 k = lo; k <= hi; k++) {
@@ -7616,6 +8014,10 @@ static int run_stmt(X *x, uint32_t si)
         const struct xmat *m = &g->mat[s->fld];
         if (m->i1 < m->lo1 || m->i1 > m->hi1 || m->j1 < m->lo2 ||
             m->j1 > m->hi2) {
+            /* one made by new is never freed: the error leaves it (one
+               with computed bounds goes with the error, D157) */
+            if (m->mode == 2)
+                x->live++;
             stop(x, 100, m->line, m->col);
             return X_RET;
         }
@@ -7688,6 +8090,79 @@ static int run_stmt(X *x, uint32_t si)
         a->dead = true;
         x->live--;
         return X_NEXT;
+    }
+    case S_RAISE: {
+        v128 m = 0;
+        if (s->e) {
+            m = ev(x, s->e);
+            if (x->trap)
+                return X_RET;
+        }
+        stop(x, (int)s->fn, s->line, s->col);
+        x->msg = m;
+        x->has_msg = s->e != 0;
+        return X_RET;
+    }
+    case S_RERAISE: {
+        /* the exception the branch took, as it was */
+        const struct xhs *h = &x->hs[x->nhs - 1];
+        stop(x, h->code, h->line, h->col);
+        x->msg = h->msg;
+        x->has_msg = h->has_msg;
+        return X_RET;
+    }
+    case S_TRY: {
+        int r = run_block(x, s->blk, s->nblk);
+        if (catchable(x)) {
+            const xarm *hit = NULL;
+            for (uint32_t k = 0; k < s->narm && !hit; k++) {
+                const xarm *a = &g->arm[s->arm + k];
+                for (uint32_t j = 0; j < a->nlab && !hit; j++)
+                    if (exc_within(g, x->code, (int)g->lab[a->lab + j].lo))
+                        hit = a;
+            }
+            if (hit || s->has_alt) {
+                if (x->nhs == sizeof(x->hs) / sizeof(x->hs[0])) {
+                    x->toolong = true;
+                    return X_RET;
+                }
+                x->hs[x->nhs++] =
+                    (struct xhs){x->code, x->line, x->col, x->msg, x->has_msg};
+                v128 m = x->msg;
+                if (!x->has_msg) {
+                    const char *t = exc_text(x->code);
+                    m = *t ? run_str(x, t, strlen(t)) : 0;
+                }
+                uint32_t occ = hit ? hit->cond : s->occ;
+                if (occ) {
+                    x->occ[occ - 1] = x->code;
+                    x->cell[x->ref[occ - 1]] = m;
+                }
+                x->trap = false;
+                r = hit ? run_block(x, hit->blk, hit->nblk)
+                        : run_block(x, s->alt, s->nalt);
+                x->nhs--;
+            }
+        }
+        if (s->has_fin && !x->halt && !x->toolong) {
+            /* on every way out; what leaves it goes on after it, unless
+               it raises */
+            bool trap = x->trap, has_msg = x->has_msg;
+            int code = x->code;
+            uint32_t line = x->line, col = x->col;
+            v128 msg = x->msg;
+            x->trap = false;
+            run_block(x, s->fin, s->nfin);
+            if (x->trap)
+                return X_RET;
+            x->trap = trap;
+            x->code = code;
+            x->line = line;
+            x->col = col;
+            x->msg = msg;
+            x->has_msg = has_msg;
+        }
+        return r;
     }
     case S_HALT: {
         /* 0 or 2..255 but 141, checked at the name: 1 is for the
@@ -7838,6 +8313,11 @@ static bool attempt(uint64_t seed, limba_lxgen *p, bool units)
         new_type(&g, (xt){K_HEAP, T_BOOL, 0, ot, 0, 0, 0, 0});
     }
 
+    /* the exceptions of the program, sometimes children of the ones
+       before (§ 3.16) */
+    g.nexc = chance(&g, 60) ? below(&g, 4) : 0;
+    for (uint32_t k = 0; k < g.nexc; k++)
+        g.xpar[k] = k && chance(&g, 40) ? (int)below(&g, k) : -1;
     /* the globals: one of an integer type and one Boolean at least, then
        the arrays; their initialisers are the statements of the same
        numbers (none for an array) */
@@ -8008,6 +8488,7 @@ static bool attempt(uint64_t seed, limba_lxgen *p, bool units)
         }
     }
     g.main_blk = block(&g, 4 + (int)below(&g, 12), &g.main_n);
+    guard_main(&g);
     while (npf)
         append(&g, &g.main_blk, &g.main_n, pfirst[--npf], true);
     while (nfirst)
@@ -8131,6 +8612,7 @@ static bool attempt(uint64_t seed, limba_lxgen *p, bool units)
                                     : 1;
     }
     x.cell = limba_xcalloc(ncell ? ncell : 1, sizeof(v128));
+    x.occ = limba_xcalloc(g.nv ? g.nv : 1, sizeof(v128));
     for (uint32_t v = 0; v < g.nv; v++)
         if (is_record(&g, g.v[v].t) || g.ty[g.v[v].t].k == K_ARRAY)
             unassigned(&g, &x.cell[x.ref[v]], g.v[v].t);
@@ -8228,6 +8710,7 @@ static bool attempt(uint64_t seed, limba_lxgen *p, bool units)
     free(in.b);
     free(x.out.b);
     free(x.cell);
+    free(x.occ);
     free(x.ref);
     free(x.alo);
     free(x.ahi);

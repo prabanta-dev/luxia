@@ -301,6 +301,20 @@ void lxl_leave_trys(lxl *L, uint32_t n)
 {
     uint32_t ntrys = L->ntrys, noccs = L->noccs;
     limba_id handler = L->handler;
+    /* the computed arrays, the try statements and the occurrences alive
+       here: a finally copied below puts its own in their places, while
+       the jump's own lists still need them (a return gives back the
+       count of the arrays, whose guards its list closes) */
+    uint32_t ndyns = L->ndyns;
+    limba_sym *dyns = limba_xmalloc((ndyns ? ndyns : 1) * sizeof(*dyns));
+    if (ndyns)
+        memcpy(dyns, L->dyns, ndyns * sizeof(*dyns));
+    lxl_try *trys = limba_xmalloc((ntrys ? ntrys : 1) * sizeof(*trys));
+    if (ntrys)
+        memcpy(trys, L->trys, ntrys * sizeof(*trys));
+    lxl_occ *occs = limba_xmalloc((noccs ? noccs : 1) * sizeof(*occs));
+    if (noccs)
+        memcpy(occs, L->occs, noccs * sizeof(*occs));
     for (uint32_t i = ntrys; i-- > n;) {
         lxl_try T = L->trys[i];
         lxl_free_dyns(L, T.ndyn);
@@ -322,6 +336,15 @@ void lxl_leave_trys(lxl *L, uint32_t n)
     L->ntrys = ntrys;
     L->noccs = noccs;
     L->handler = handler;
+    if (ndyns)
+        memcpy(L->dyns, dyns, ndyns * sizeof(*dyns));
+    if (ntrys)
+        memcpy(L->trys, trys, ntrys * sizeof(*trys));
+    if (noccs)
+        memcpy(L->occs, occs, noccs * sizeof(*occs));
+    free(dyns);
+    free(trys);
+    free(occs);
 }
 
 /* does branch h take exception t: one of its names is t or a family of

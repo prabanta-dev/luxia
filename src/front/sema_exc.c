@@ -288,16 +288,9 @@ void lxs_exc_raise(limba_lxs *S, uint32_t node, uint32_t scope)
     }
 }
 
-/* a routine and its heading in an interface are one */
-static limba_sym canon(const limba_lxs *S, limba_sym s)
-{
-    uint32_t h = lxs_heading(S, s);
-    return h ? h : s;
-}
-
 bool lxs_exc_handled_is(const limba_lxs *S, limba_sym s)
 {
-    return S->handled && S->handled[canon(S, s)];
+    return S->handled && S->handled[s];
 }
 
 void lxs_exc_handled(limba_lxs *S)
@@ -312,7 +305,7 @@ void lxs_exc_handled(limba_lxs *S)
     S->handled = limba_xcalloc(ns, 1);
     for (limba_sym x = 1; x < S->ntry_at && x < ns; x++)
         if (S->try_at[x])
-            S->handled[canon(S, x)] = 1;
+            S->handled[x] = 1;
     /* what they call, through all calls; a call through a value reaches
        every routine taken as a value (wider than Limba's set, which goes
        by signature: never narrower, or an array would be lost) */
@@ -320,21 +313,20 @@ void lxs_exc_handled(limba_lxs *S)
         changed = false;
         for (uint32_t i = 0; i < S->nuses; i++) {
             const limba_lxs_use *u = &S->uses[i];
-            bool from = u->who & LXS_INIT ? S->main_handled
-                                          : S->handled[canon(S, u->who)];
+            bool from =
+                u->who & LXS_INIT ? S->main_handled : S->handled[u->who];
             if (!from || u->taken ||
                 S->st.sym[u->what].kind != LIMBA_LSYM_ROUTINE ||
-                S->handled[canon(S, u->what)])
+                S->handled[u->what])
                 continue;
-            S->handled[canon(S, u->what)] = 1;
+            S->handled[u->what] = 1;
             changed = true;
         }
         for (uint32_t i = 0; i < S->nicalls; i++) {
             uint32_t w = S->icalls[i].who;
-            bool from =
-                w & LXS_INIT ? S->main_handled : S->handled[canon(S, w)];
+            bool from = w & LXS_INIT ? S->main_handled : S->handled[w];
             for (uint32_t k = 0; from && k < S->nptaken; k++) {
-                limba_sym r = canon(S, S->ptaken[k].routine);
+                limba_sym r = S->ptaken[k].routine;
                 if (!S->handled[r]) {
                     S->handled[r] = 1;
                     changed = true;

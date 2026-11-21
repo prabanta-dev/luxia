@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- The random programs of the tests raise and take exceptions (step 4,
+  stage 5): exceptions of the program and their families, try with
+  branches, else, when var e:, finally, raise and raise;, jumps through
+  a finally, statements of the program each in a try that prints what it
+  took. They found three faults of the front end, fixed: a jump through a
+  finally that declares its own computed array or try lost the ones of
+  the jump's lists; a variable kept in a slot was saved by every try
+  after its list ended; the routines under a handler were looked up by
+  the node of their heading in an interface.
+  Still to come (M4): the engines compared on what memory holds at the
+  end, after an exception taken too, once `meri --live` is there.
 - Arrays whose length is known at run time are assigned whole (step 4,
   stage 4): an open `var` or `out` parameter, an array with computed
   bounds, `p^` of an array made by new, from any array the open parameter

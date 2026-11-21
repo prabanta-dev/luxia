@@ -1086,10 +1086,14 @@ void lxl_stmts(lxl *L, uint32_t list)
 static void stmts(lxl *L, uint32_t list)
 {
     uint32_t keep = L->ndyns;
+    /* the variables with a shadow declared here end with the list: no
+       try after it saves theirs (a handler would read them) */
+    uint32_t nshadowed = L->nshadowed;
     unsigned suppress = L->suppress; /* a pragma here lasts to the end */
     for (uint32_t i = 0; i < list_n(L, list); i++)
         stmt(L, list_at(L, list, i));
     L->suppress = suppress;
+    L->nshadowed = nshadowed;
     if (L->ndyns > keep) {
         if (!limba_ssa_terminated(L->ssa, L->cur))
             free_dyns(L, keep);

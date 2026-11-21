@@ -2628,6 +2628,79 @@ static const run_case
              "  Grow(3);\n"
              "end.\n",
              "10 b20\n3 a4\n", "ok"},
+            /* a jump through a finally that declares its own computed
+               array and try: the lists of the jump keep theirs; a variable
+               with a shadow ends with its list, no try after it saves it */
+            {"program d;\n"
+             "var g: Int32 := 1;\n"
+             "procedure p0();\n"
+             "begin\n"
+             "  try\n"
+             "    var v16: array[Int32 range g..(g + 3)] of String;\n"
+             "    v16[g] := str(g);\n"
+             "    return;\n"
+             "  finally\n"
+             "    repeat\n"
+             "      var v29: array[Int32 range g..(g + 2)] of String;\n"
+             "      v29[g] := str(g + 1);\n"
+             "      writeln(v29[g]);\n"
+             "    until g > 0;\n"
+             "  end;\n"
+             "end;\n"
+             "begin p0(); writeln(\"end\"); end.\n",
+             "2\nend\n", "ok"},
+            {"program m;\n"
+             "var g: Int32 := 1;\n"
+             "procedure p0(a10: Boolean);\n"
+             "begin\n"
+             "  try\n"
+             "    if a10 then\n"
+             "      return;\n"
+             "    end;\n"
+             "  except\n"
+             "    when ShiftError:\n"
+             "      return;\n"
+             "  finally\n"
+             "    var w23: Int32 := 0;\n"
+             "    repeat\n"
+             "      var v24: array[Int32 range w23..(w23 + 1)] of String;\n"
+             "      try\n"
+             "        writeln(\"in\");\n"
+             "      finally\n"
+             "        writeln(\"inner\");\n"
+             "      end;\n"
+             "      w23 := w23 + 1;\n"
+             "    until (w23 >= 2);\n"
+             "  end;\n"
+             "end;\n"
+             "begin p0(true); p0(false); writeln(\"end\"); end.\n",
+             "in\ninner\nin\ninner\nin\ninner\nin\ninner\nend\n", "ok"},
+            {"program sh;\n"
+             "var g: Int32 := 0;\n"
+             "begin\n"
+             "  try\n"
+             "    var v: Int32 := 1;\n"
+             "    for var i: Int32 := 1 to 2 do\n"
+             "      try\n"
+             "        writeln(v div g);\n"
+             "      except\n"
+             "        when DivisionError:\n"
+             "          v := v + 1;\n"
+             "      end;\n"
+             "    end;\n"
+             "    writeln(v);\n"
+             "  except\n"
+             "    when var e:\n"
+             "      writeln(e.name);\n"
+             "  end;\n"
+             "  try\n"
+             "    writeln(3);\n"
+             "  except\n"
+             "    when var f:\n"
+             "      writeln(f.name);\n"
+             "  end;\n"
+             "end.\n",
+             "3\n3\n", "ok"},
 };
 
 /* an input that cannot be read: a directory (EISDIR) */
@@ -3659,6 +3732,39 @@ static const unit_case unit_cases[] = {
      "",
      "errors",
      "L0079@p.luxia:5:15"},
+    /* a routine of an interface under a handler: its symbol is the one of
+       its body (the set of D157 read past its end before) */
+    {{{"p.luxia",
+       "program P;\n"
+       "uses A;\n"
+       "begin\n"
+       "  try\n"
+       "    A.Fill(3);\n"
+       "  except\n"
+       "    when var e:\n"
+       "      writeln(e.name, \" \", e.message);\n"
+       "  end;\n"
+       "  Fill(2);\n"
+       "  writeln(\"end\");\n"
+       "end.\n"},
+      {"a.luxia",
+       "unit A;\n"
+       "interface\n"
+       "procedure Fill(n: Int32);\n"
+       "implementation\n"
+       "procedure Fill(n: Int32);\n"
+       "var buf: array[Int32 range 1..n] of String;\n"
+       "begin\n"
+       "  buf[1] := str(n);\n"
+       "  if n > 2 then\n"
+       "    raise RangeError with buf[1];\n"
+       "  end;\n"
+       "  writeln(buf[1]);\n"
+       "end Fill;\n"
+       "end A.\n"}},
+     "RangeError 3\n2\nend\n",
+     "ok",
+     ""},
 };
 
 /* the reader of the files of a case */
