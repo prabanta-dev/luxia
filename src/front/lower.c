@@ -206,6 +206,7 @@ static unsigned check_of(int64_t code)
     case LXR_INDEX:
         return LXS_CHECK_INDEX;
     case LXR_RANGE:
+    case LXR_LENGTH: /* the length checks of § 7.1 (§ 10.1) */
         return LXS_CHECK_RANGE;
     case LXR_OVERFLOW:
         return LXS_CHECK_OVERFLOW;

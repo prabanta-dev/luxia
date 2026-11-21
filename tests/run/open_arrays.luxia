@@ -1,0 +1,101 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+// Arrays whose length is known at run time, assigned whole (§ 7.1), and
+// var parameters of a narrow subtype checked at each read (§ 3.11)
+program open_arrays;
+
+type
+  Names = array[Int32 range <>] of String;
+  Grid = array[Int32 range <>, Int32 range <>] of Int32;
+  Digit = Int32 range 0..9;
+  Cell = record d: Digit; end;
+
+procedure Take(var a: Names; b: Names);
+begin
+  a := b;
+end Take;
+
+procedure Same(var a: Names);
+begin
+  a := a;
+end Same;
+
+procedure Show(a: Names);
+begin
+  for var i := low(a) to high(a) do
+    write(a[i], " ");
+  end;
+  writeln(low(a), "..", high(a));
+end Show;
+
+procedure Three(var a: Names);
+begin
+  a := {"x" & "1", "y", else "z"};
+end Three;
+
+procedure Grow(n: Int32);
+var c: array[Int32 range 1..n] of String;
+var d: array[Int32 range 2..n + 1] of String;
+begin
+  Three(c);
+  d := c;
+  c := {"u", else "v"};
+  Show(c);
+  Show(d);
+end Grow;
+
+procedure Put(var m: Grid; f: Grid);
+begin
+  m := f;
+end Put;
+
+procedure Next(var d: Digit);
+begin
+  writeln(d + 1);
+end Next;
+
+var x: array[Int32 range 1..3] of String := {"a", "b", "c"};
+var y: array[Int32 range 5..7] of String := {"p", "q", "r"};
+var g: array[Int32 range 1..2, Int32 range 1..2] of Int32 := {{5, 6}, {7, 8}};
+var h: array[Int32 range 3..4, Int32 range 0..1] of Int32;
+var full: Cell;
+var empty: Cell;
+
+begin
+  Take(x, y);
+  Show(x);
+  x[2] := "b" & str(2);
+  Same(x);
+  Show(x);
+  Three(x);
+  Show(x);
+  var p := new(Names range 0..2);
+  p^ := x;
+  x[1] := "w";
+  writeln(p[0], " ", p[1], " ", p[2]);
+  dispose(p);
+  Grow(3);
+  Grow(2);
+  try
+    Take(x, {"m", "n"});
+  except
+    when LengthError var e:
+      writeln(e.name, ": ", e.message, " at ", e.position);
+  end;
+  try
+    Grow(1);
+  except
+    when LengthError var e:
+      writeln(e.name, " at ", e.position);
+  end;
+  Put(h, g);
+  writeln(h[3, 0], " ", h[3, 1], " ", h[4, 0], " ", h[4, 1]);
+  full.d := 4;
+  Next(full.d);
+  try
+    Next(empty.d);
+  except
+    when RangeError var e:
+      writeln(e.name, ": ", e.message, " at ", e.position);
+  end;
+end.

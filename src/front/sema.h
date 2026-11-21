@@ -594,6 +594,16 @@ bool lxs_assign_to(limba_lxs *S, uint32_t node, limba_ltype target,
                    const char *what);
 /* a variable that may be written (for :=, var and out arguments) */
 bool lxs_writable(limba_lxs *S, uint32_t node, bool report);
+/* is t an array whose length is known only at run time, as the target of
+   an assignment (§ 7.1): an open parameter, p^ of an array made by new,
+   an array with computed bounds */
+bool lxs_runtime_length(const limba_lxs *S, limba_ltype t);
+/* value assigned to such a target of type t (§ 7.1): any array the open
+   parameter of its elements and indices takes, an aggregate with the
+   bounds of the target (§ 6.8), lengths known and different L0113;
+   reported only if ok (the target may be written) */
+void lxs_assign_whole(limba_lxs *S, uint32_t value, uint32_t scope,
+                      limba_ltype t, bool ok);
 /* the constant d of type t, declared with an aggregate: a typed constant
    (§ 4.3) if t is a record or an array; false if t is neither */
 bool lxs_typed_const(limba_lxs *S, uint32_t d, limba_sym s, limba_ltype t);

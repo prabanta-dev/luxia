@@ -173,3 +173,5 @@ LX_ERROR(110, FINALLY_JUMP)     /* return, exit, continue leaving a
 LX_ERROR(111, NO_HANDLERS)      /* try under restrictions(no_handlers) */
 LX_ERROR(112, OCCURRENCE)       /* the occurrence used other than by
                                    message, position, name */
+LX_ERROR(113, LENGTH)           /* an array assigned whole from one of
+                                   another length, both known */

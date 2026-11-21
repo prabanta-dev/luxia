@@ -1039,9 +1039,10 @@ static void agg_elems(lxl *L, uint32_t node, limba_id p, limba_ltype t,
         lxl_at(L, node);
         if (!named) {
             limba_id np = lxl_iconst(L, LIMBA_T_I64, npos);
+            /* another length: as an array of another length (§ 7.1) */
             lxl_check(
                 L, cmp(L, false, other ? LIMBA_CC_SLE : LIMBA_CC_EQ, np, dlen),
-                LXR_RANGE);
+                LXR_LENGTH);
         } else if (!other) {
             limba_id a = cmp(L, false, LIMBA_CC_EQ, dlo,
                              lxl_iconst(L, LIMBA_T_I64, (int64_t)nlo));
@@ -1981,7 +1982,19 @@ limba_id lxl_value(lxl *L, uint32_t node)
         if (st->kind == LXL_SSA)
             return limba_ssa_use(L->ssa, st->var, L->cur, node);
         lxl_shadow_use(L, s, node); /* captured by a nested routine */
-        return load(L, t, lxl_var_addr(L, s));
+        limba_id v = load(L, t, lxl_var_addr(L, s));
+        const limba_symbol *y = &S->st.sym[s];
+        if (y->kind == LIMBA_LSYM_PARAM && y->mode == LXS_VAR && narrow(L, t) &&
+            !L->dry) {
+            /* a var parameter may be bound to a component no one
+               assigned: checked at each read, as the component (§ 3.11,
+               D145); not in a routine made only for its errors, whose
+               positions would stay in the module */
+            const limba_typeinfo *r = ti(L, t);
+            lxl_at(L, node);
+            check_range(L, v, t, r->lo, r->hi, LXR_RANGE);
+        }
+        return v;
     }
     case LXN_SEL:
     case LXN_INDEX:
@@ -2009,9 +2022,9 @@ limba_id lxl_value(lxl *L, uint32_t node)
         if (narrow(L, t)) {
             /* a value no one assigned, in a variable or from new, is
                caught here */
-            const limba_typeinfo *x = ti(L, t);
+            const limba_typeinfo *r = ti(L, t);
             lxl_at(L, node);
-            check_range(L, v, t, x->lo, x->hi, LXR_RANGE);
+            check_range(L, v, t, r->lo, r->hi, LXR_RANGE);
         }
         return v;
     }
@@ -2042,40 +2055,89 @@ limba_id lxl_value(lxl *L, uint32_t node)
     return lxl_iconst(L, lxl_type(L, t), 0);
 }
 
+/* the number of elements of an index lo..hi (i64 values), 0 if empty */
+static limba_id index_length(lxl *L, limba_id lo, limba_id hi)
+{
+    limba_id k = bin(L, LIMBA_OP_ADD, LIMBA_T_I64,
+                     bin(L, LIMBA_OP_SUB, LIMBA_T_I64, hi, lo),
+                     lxl_iconst(L, LIMBA_T_I64, 1));
+    limba_id zero = lxl_iconst(L, LIMBA_T_I64, 0);
+    uint32_t sel[3] = {cmp(L, false, LIMBA_CC_SLT, k, zero), zero, k};
+    return lxl_emit(L, LIMBA_OP_SELECT, LIMBA_T_I64, 0, 0, 0, sel, 3);
+}
+
+/* target := value, the target an array whose length is known at run
+   time (§ 7.1): an open parameter, an array with computed bounds, p^ of
+   an array made by new. The target first, then the value; the lengths
+   equal index by index (LengthError), the cells copied in order, the
+   value read whole first (memcpy is memmove: a := a is a copy). An
+   aggregate is computed whole in a block of its own, with the bounds of
+   the target (§ 6.8), then moved into it */
+static void assign_whole(lxl *L, uint32_t node, uint32_t target, uint32_t value)
+{
+    limba_ltype t = ntype(L, target), cell = lxl_cell_type(L, t);
+    uint32_t dims = lxl_dims(L, t);
+    limba_id *b = limba_xmalloc(4 * dims * sizeof(*b));
+    limba_id *dlo = b, *dhi = b + dims, *slo = b + 2 * dims,
+             *shi = b + 3 * dims, dp, sp;
+    lxl_multi_parts(L, target, node, &dp, dlo, dhi);
+    limba_id n = LIMBA_NONE;
+    for (uint32_t d = 0; d < dims; d++) {
+        limba_id k = index_length(L, dlo[d], dhi[d]);
+        n = d ? bin(L, LIMBA_OP_MUL, LIMBA_T_I64, n, k) : k;
+    }
+    limba_id bytes =
+        bin(L, LIMBA_OP_MUL, LIMBA_T_I64, n,
+            lxl_iconst(L, LIMBA_T_I64, (int64_t)ti(L, cell)->size));
+    if (nd(L, value)->kind == LXN_AGG) {
+        /* of one index (sema): its elements in a block, then moved into
+           the target, its old Strings released */
+        limba_id tmp = lxl_rt(L, LIMBA_RT_MEM_ALLOC, LIMBA_T_PTR, &bytes, 1);
+        uint32_t z[3] = {tmp, lxl_iconst(L, LIMBA_T_I8, 0), bytes};
+        lxl_emit(L, LIMBA_OP_MEMSET, LIMBA_T_VOID, 0, 0, 0, z, 3);
+        /* what the aggregate runs may raise: then the block goes (D157) */
+        uint32_t guard =
+            lxl_guard_begin(L, tmp, lxl_holds_str(L, cell) ? cell : 0, n);
+        lxl_agg_fill_dyn(L, value, tmp, ntype(L, value), dlo[0], dhi[0]);
+        lxl_guard_end(L, guard);
+        lxl_at(L, node);
+        lxl_live(L, dp);
+        lxl_rc(L, LIMBA_OP_RELEASE, dp, cell, n);
+        uint32_t m[3] = {dp, tmp, bytes};
+        lxl_emit(L, LIMBA_OP_MEMCPY, LIMBA_T_VOID, 0, 0, 0, m, 3);
+        lxl_rt(L, LIMBA_RT_MEM_FREE, LIMBA_T_VOID, &tmp, 1);
+        free(b);
+        return;
+    }
+    lxl_multi_parts(L, value, node, &sp, slo, shi);
+    lxl_at(L, node); /* a length, a dangling pointer at the assignment */
+    limba_id same = LIMBA_NONE;
+    for (uint32_t d = 0; d < dims; d++) {
+        limba_id e = cmp(L, false, LIMBA_CC_EQ, index_length(L, dlo[d], dhi[d]),
+                         index_length(L, slo[d], shi[d]));
+        same = d ? bin(L, LIMBA_OP_AND, LIMBA_T_I1, same, e) : e;
+    }
+    free(b);
+    lxl_check(L, same, LXR_LENGTH);
+    lxl_live(L, sp);
+    lxl_live(L, dp);
+    /* retain the value, release the target, then the bytes: the
+       order of a copy, right when both are one array (lxl_copy) */
+    lxl_rc(L, LIMBA_OP_RETAIN, sp, cell, n);
+    lxl_rc(L, LIMBA_OP_RELEASE, dp, cell, n);
+    uint32_t m[3] = {dp, sp, bytes};
+    lxl_emit(L, LIMBA_OP_MEMCPY, LIMBA_T_VOID, 0, 0, 0, m, 3);
+}
+
 void lxl_assign(lxl *L, uint32_t node, uint32_t target, uint32_t value)
 {
     limba_lxs *S = L->S;
     limba_ltype t = ntype(L, target);
     /* the target first, its index checked, then the value (luxia_0.md
        § 6: from left to right) */
-    if (!lxl_scalar(L, t) && nd(L, value)->kind == LXN_AGG &&
-        (ti(L, t)->flags & LIMBA_TF_DYNAMIC)) {
-        /* computed bounds: the value whole in a block of its own, then
-           moved into the elements, their old Strings released (§ 6.8) */
-        const lxl_store *st = &L->store[S->sym[target]];
-        limba_ltype it = ti(L, t)->index, et = ti(L, t)->elem;
-        limba_id lo = lxl_to_i64(L, st->lo, it), hi = lxl_to_i64(L, st->hi, it);
-        limba_id empty =
-            cmp(L, false,
-                lxl_signed(L, lxs_base(S, it)) ? LIMBA_CC_SLT : LIMBA_CC_ULT,
-                hi, lo);
-        limba_id n = lxl_count(L, empty, lo, hi);
-        limba_id bytes =
-            bin(L, LIMBA_OP_MUL, LIMBA_T_I64, n,
-                lxl_iconst(L, LIMBA_T_I64, (int64_t)ti(L, et)->size));
-        limba_id tmp = lxl_rt(L, LIMBA_RT_MEM_ALLOC, LIMBA_T_PTR, &bytes, 1);
-        uint32_t z[3] = {tmp, lxl_iconst(L, LIMBA_T_I8, 0), bytes};
-        lxl_emit(L, LIMBA_OP_MEMSET, LIMBA_T_VOID, 0, 0, 0, z, 3);
-        /* what the aggregate runs may raise: then the block goes (D157) */
-        uint32_t guard =
-            lxl_guard_begin(L, tmp, lxl_holds_str(L, et) ? et : 0, n);
-        lxl_agg_fill_dyn(L, value, tmp, t, lo, hi);
-        lxl_guard_end(L, guard);
-        lxl_live(L, st->addr);
-        lxl_rc(L, LIMBA_OP_RELEASE, st->addr, et, n);
-        uint32_t m[3] = {st->addr, tmp, bytes};
-        lxl_emit(L, LIMBA_OP_MEMCPY, LIMBA_T_VOID, 0, 0, 0, m, 3);
-        lxl_rt(L, LIMBA_RT_MEM_FREE, LIMBA_T_VOID, &tmp, 1);
+    if (!lxl_scalar(L, t) && (ti(L, t)->kind == LIMBA_LTK_OPEN ||
+                              (ti(L, t)->flags & LIMBA_TF_DYNAMIC))) {
+        assign_whole(L, node, target, value);
         return;
     }
     if (!lxl_scalar(L, t)) {

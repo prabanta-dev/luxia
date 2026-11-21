@@ -58,6 +58,9 @@ enum {
     64u /* ARRAY, OPEN: one of more indices; the                               \
            element is the array of the next ones,                              \
            no object of its own */
+#define LIMBA_TF_COMPUTED                                                      \
+    128u /* ARRAY: the bounds of this index are computed (DYNAMIC is also      \
+            set by a computed index after it) */
 
 typedef struct {
     uint8_t kind;

@@ -1193,6 +1193,7 @@ static limba_ltype type_node(limba_lxs *S, uint32_t node, uint32_t scope,
                       lxs_tname(S, index, tb));
             return 0;
         }
+        bool own = dyn; /* this index computed, not only one after it */
         if (multi && (lxs_ty(S, elem)->flags & LIMBA_TF_DYNAMIC))
             dyn = true;
         const limba_typeinfo *et = lxs_ty(S, elem);
@@ -1210,6 +1211,8 @@ static limba_ltype type_node(limba_lxs *S, uint32_t node, uint32_t scope,
                       "the array is larger than the memory can address");
         if (multi)
             S->ts.t[a].flags |= LIMBA_TF_MULTI;
+        if (own)
+            S->ts.t[a].flags |= LIMBA_TF_COMPUTED;
         return a;
     }
     case LXN_TOPEN: {

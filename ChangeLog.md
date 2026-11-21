@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Arrays whose length is known at run time are assigned whole (step 4,
+  stage 4): an open `var` or `out` parameter, an array with computed
+  bounds, `p^` of an array made by new, from any array the open parameter
+  would take, an aggregate or a call; the lengths equal index by index,
+  else `LengthError` (L0113 when both are known), the value read whole
+  first. A positional aggregate of the wrong length for computed bounds
+  is now a `LengthError` too. A scalar `var` parameter of a narrow
+  subtype is checked at each read, as a component is.
 - Exceptions (step 4 of Luxia 1, stage 3): `type E = exception(P)`,
   `raise E with m`, `raise;`, `try` with branches `when A, B var e:`,
   `when var e:`, `else` and `finally`; the occurrence `e.message`,

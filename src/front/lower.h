@@ -40,6 +40,7 @@ enum {
     LXR_CONVERSION = LIMBA_TRAP_CONVERSION,
     LXR_SHIFT = LIMBA_TRAP_SHIFT,
     LXR_DANGLING = LIMBA_TRAP_DANGLING,
+    LXR_LENGTH = LIMBA_TRAP_LENGTH,
 };
 
 /* the module of a checked program; NULL if errors were reported */

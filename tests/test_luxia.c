@@ -647,9 +647,19 @@ static const sema_case sema_cases[] =
         {"program p; type R = record x: Int32; end; procedure s(r: R); begin "
          "end s; begin var q := new(R); s(q^); end.",
          "L0059@1:101"},
-        {"program p; type A = array[Int32 range <>] of Int32; begin var p := "
-         "new(A range 1..3); var q := new(A range 1..3); p^ := q^; end.",
-         "L0049@1:116 L0049@1:122"},
+        /* arrays whose length is known at run time, assigned whole
+           (§ 7.1): p^ only to such a target, lengths known and different,
+           the rule of the comparison, written, aggregates of one index */
+        {"program p; type A = array[Int32 range <>] of Int32; begin var p := new(A range 1..3); var a: array[Int32 range 1..3] of Int32; a := p^; end.",
+         "L0049@1:134"},
+        {"program p; procedure P(n: Int32); var m: array[Int32 range 1..n, Int32 range 1..3] of Int32; var f: array[Int32 range 1..2, Int32 range 1..4] of Int32; var g: array[Int32 range 1..5, Int32 range 1..3] of Int32; begin m := f; m := g; end P; begin end.",
+         "L0113@1:223"},
+        {"program p; procedure P(var a: array[Int32 range <>] of Int32; b: array[Int32 range 1..2] of Int64; c: array[Int64 range 1..2] of Int32); begin a := b; a := c; end P; begin end.",
+         "L0027@1:149 L0027@1:157"},
+        {"program p; procedure P(a: array[Int32 range <>] of Int32; b: array[Int32 range 1..2] of Int32); var f: array[Int32 range 1..2] of Int32; begin a := b; f := a; end P; begin end.",
+         "L0034@1:144 L0027@1:157"},
+        {"program p; procedure P(var m: array[Int32 range <>, Int32 range <>] of Int32); begin m := {{1}}; end P; begin end.",
+         "L0054@1:91"},
         {"program p; type A = array[Int32 range <>] of Int32; begin var p := "
          "new(A); end.",
          "L0049@1:68"},
@@ -1726,7 +1736,7 @@ static const run_case
              "true false 0\n1 0 0\n1 0 0\n0 -1 0\n0 2 3\n-2 -1 2\n0 1 2\n",
              "ok"},
             {"program t; procedure Q(n: Int32);\nvar a: array[Int32 range 1..n] of String := {\"x\" & \"1\", \"y\", else \"z\"};\nbegin writeln(a[1], a[n]); a := {1: \"p\", else \"q\"}; writeln(a[1], a[n]); end Q;\nbegin Q(3); Q(2); Q(1); end t.",
-             "x1z\npq\nx1y\npq\n", "trap 101 at 2:45"},
+             "x1z\npq\nx1y\npq\n", "trap 108 at 2:45"},
             {"program t; type R = record s: String; n: Int32; end;\nbegin for var k: Int32 := 1 to 3 do var r: R := {s: str(k) & \"a\"; n: k}; r := {s: r.s & str(r.n); n: r.n * 2}; writeln(r.s, \" \", r.n); end; end t.",
              "1a1 2\n2a2 4\n3a3 6\n", "ok"},
             /* indices past Int64: the runs else fills, exact */
@@ -2544,6 +2554,80 @@ static const run_case
              "  writeln(s);\n"
              "end.\n",
              "ab ab! E\nabt.luxia:8:19\n", "ok"},
+            /* arrays of more indices assigned whole, computed and made by
+               new, of another length a LengthError (§ 7.1) */
+            {"program p;\n"
+             "type M = array[Int32 range <>, Int32 range <>] of Int32;\n"
+             "procedure Rows(n: Int32);\n"
+             "var g: array[Int32 range 1..n, Int32 range 1..2] of Int32;\n"
+             "var f: array[Int32 range 0..1, Int32 range 5..6] of Int32 := {{1, 2}, {3, 4}};\n"
+             "begin\n"
+             "  g := f;\n"
+             "  writeln(g[1, 1], \" \", g[1, 2], \" \", g[2, 1], \" \", g[2, 2]);\n"
+             "end Rows;\n"
+             "var a: array[Int32 range 1..2, Int32 range 1..2] of Int32 := {{5, 6}, {7, 8}};\n"
+             "begin\n"
+             "  Rows(2);\n"
+             "  var p := new(M range 1..2, 1..2);\n"
+             "  var q := new(M range 0..1, 0..1);\n"
+             "  p^ := a;\n"
+             "  q^ := p^;\n"
+             "  p^ := p^;\n"
+             "  writeln(q[0, 0], \" \", q[1, 1], \" \", p[2, 1]);\n"
+             "  dispose(p);\n"
+             "  dispose(q);\n"
+             "  Rows(3);\n"
+             "end.\n",
+             "1 2 3 4\n5 8 7\n", "trap 108 at 7:3"},
+            /* a var parameter of a narrow subtype, bound to a component no
+               one assigned: checked where it is read (§ 3.11, D145) */
+            {"program p;\n"
+             "type Digit = Int32 range 0..9;\n"
+             "type Rec = record d: Digit; end;\n"
+             "procedure Show(var d: Digit);\n"
+             "begin\n"
+             "  writeln(d + 1);\n"
+             "end Show;\n"
+             "procedure Four(var d: Digit);\n"
+             "begin\n"
+             "  d := 4;\n"
+             "  writeln(d);\n"
+             "end Four;\n"
+             "var full, blank: Rec;\n"
+             "var k: Digit := 7;\n"
+             "begin\n"
+             "  Show(k);\n"
+             "  Four(full.d);\n"
+             "  Show(full.d);\n"
+             "  Show(blank.d);\n"
+             "end.\n",
+             "8\n4\n5\n", "trap 101 at 6:11"},
+            /* a := a of counted Strings: the value retained before the
+               target is released (§ 7.1) */
+            {"program p;\n"
+             "type S = array[Int32 range <>] of String;\n"
+             "procedure Same(var a: S);\n"
+             "begin\n"
+             "  a := a;\n"
+             "end Same;\n"
+             "procedure Grow(n: Int32);\n"
+             "var c: array[Int32 range 1..n] of String;\n"
+             "begin\n"
+             "  c[1] := str(n);\n"
+             "  c[n] := \"a\" & str(n + 1);\n"
+             "  c := c;\n"
+             "  Same(c);\n"
+             "  writeln(c[1], \" \", c[n]);\n"
+             "end Grow;\n"
+             "var x: array[Int32 range 1..2] of String;\n"
+             "begin\n"
+             "  x[1] := str(10);\n"
+             "  x[2] := \"b\" & str(20);\n"
+             "  Same(x);\n"
+             "  writeln(x[1], \" \", x[2]);\n"
+             "  Grow(3);\n"
+             "end.\n",
+             "10 b20\n3 a4\n", "ok"},
 };
 
 /* an input that cannot be read: a directory (EISDIR) */

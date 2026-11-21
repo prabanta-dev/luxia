@@ -967,6 +967,80 @@ static void check_format(limba_lxs *S, uint32_t list)
     }
 }
 
+bool lxs_runtime_length(const limba_lxs *S, limba_ltype t)
+{
+    const limba_typeinfo *x = &S->ts.t[t];
+    return x->kind == LIMBA_LTK_OPEN ||
+           (x->kind == LIMBA_LTK_ARRAY && (x->flags & LIMBA_TF_DYNAMIC));
+}
+
+/* what an aggregate assigned to an array of type t is checked as: for
+   an open one, an array of its indices and elements with computed
+   bounds, those of the target (§ 6.8) */
+static limba_ltype computed_of(limba_lxs *S, limba_ltype t)
+{
+    const limba_typeinfo *x = lxs_ty(S, t);
+    if (x->kind != LIMBA_LTK_OPEN)
+        return t;
+    bool multi = x->flags & LIMBA_TF_MULTI;
+    limba_ltype index = x->index, elem = x->elem;
+    if (multi)
+        elem = computed_of(S, elem);
+    bool ok;
+    limba_ltype a = limba_types_array(&S->ts, index, elem, true, &ok);
+    S->ts.t[a].flags |= LIMBA_TF_COMPUTED | (multi ? LIMBA_TF_MULTI : 0);
+    return a;
+}
+
+/* the length of the index of array type t, if known at compile time */
+static bool known_length(limba_lxs *S, limba_ltype t, __int128 *len)
+{
+    const limba_typeinfo *x = lxs_ty(S, t);
+    if (x->kind != LIMBA_LTK_ARRAY || (x->flags & LIMBA_TF_COMPUTED))
+        return false;
+    const limba_typeinfo *ix = lxs_ty(S, x->index);
+    *len = ix->hi < ix->lo ? 0 : ix->hi - ix->lo + 1;
+    return true;
+}
+
+void lxs_assign_whole(limba_lxs *S, uint32_t value, uint32_t scope,
+                      limba_ltype t, bool ok)
+{
+    if (lxs_node(S, value)->kind == LXN_AGG) {
+        lxs_expr(S, value, scope, computed_of(S, t));
+        return;
+    }
+    S->open_ok = lxs_node(S, value)->kind == LXN_DEREF;
+    limba_ltype vt = lxs_expr(S, value, scope, t);
+    S->open_ok = false;
+    if (!ok || !vt)
+        return;
+    char ta[128], tb[128];
+    if (untyped(S, vt) || vt == S->ts.nil || !lxs_open_fits(S, vt, t)) {
+        lxs_error(S, LXE_TYPE_MISMATCH, value,
+                  "this is %s, the variable wants %s: an array of the "
+                  "same elements and indices",
+                  lxs_tname(S, vt, ta), lxs_tname(S, t, tb));
+        return;
+    }
+    /* index by index: both lengths known and different (§ 7.1) */
+    limba_ltype a = vt, b = t;
+    for (uint32_t d = 1;; d++) {
+        __int128 la, lb;
+        if (known_length(S, a, &la) && known_length(S, b, &lb) && la != lb) {
+            lxs_error(S, LXE_LENGTH, value,
+                      "index %u has %lld values in the variable, %lld in "
+                      "the value",
+                      d, (long long)lb, (long long)la);
+            return;
+        }
+        if (!(lxs_ty(S, a)->flags & LIMBA_TF_MULTI))
+            return;
+        a = lxs_ty(S, a)->elem;
+        b = lxs_ty(S, b)->elem;
+    }
+}
+
 /* an array of type at fits open parameter type pt: arrays both, index
    by index of one base (as many indices), elements compatible */
 bool lxs_open_fits(limba_lxs *S, limba_ltype at, limba_ltype pt)
@@ -2420,8 +2494,8 @@ limba_ltype lxs_expr(limba_lxs *S, uint32_t node, uint32_t scope,
             lxs_error(S, LXE_OPEN_ARRAY_PLACE, node,
                       "an array made by new is used through its elements, "
                       "low, high, length, move, translate, reverse, "
-                      "occurrences, readbytes and writebytes, and compared "
-                      "with = and <>: not otherwise as a whole");
+                      "occurrences, readbytes and writebytes, compared with "
+                      "= and <> and assigned: not otherwise as a whole");
             return set(S, node, 0);
         }
         return set(S, node, e);

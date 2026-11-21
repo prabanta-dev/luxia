@@ -222,8 +222,15 @@ static void stmt(limba_lxs *S, uint32_t node, uint32_t scope)
     switch (x->kind) {
     case LXN_ASSIGN: {
         uint32_t target = x->a, value = x->b;
+        /* p^ of an array made by new is assigned whole (§ 7.1) */
+        S->open_ok = lxs_node(S, target)->kind == LXN_DEREF;
         limba_ltype t = lxs_expr(S, target, scope, 0);
+        S->open_ok = false;
         bool ok = lxs_writable(S, target, true);
+        if (t && lxs_runtime_length(S, t)) {
+            lxs_assign_whole(S, value, scope, t, ok);
+            break;
+        }
         lxs_expr(S, value, scope, t);
         if (ok)
             lxs_assign_to(S, value, t, "the variable");
