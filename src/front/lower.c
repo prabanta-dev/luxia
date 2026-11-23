@@ -1607,6 +1607,11 @@ static void declare_routine(lxl *L, limba_sym s, const limba_lx_node *x)
     } else {
         name = ir_name(L, s, prof);
     }
+    if (lxl_external(L, s) && lxs_rt_of(S, x->d) >= 0) {
+        /* a function of the runtime (§ 8.5): called with call.rt */
+        L->func_of[s] = LIMBA_NONE;
+        return;
+    }
     if (lxl_external(L, s)) {
         /* a routine of C: an extern of the module, its symbol
            the name as written unless name gives it */

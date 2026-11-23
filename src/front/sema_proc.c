@@ -189,6 +189,9 @@ limba_ltype lxs_proc_value(limba_lxs *S, uint32_t node, uint32_t scope,
         if (lxs_outer(S, m))
             no = "a routine nested in another is not a value: its "
                  "environment would have to go with it";
+        else if (r->d && lxs_node(S, r->d)->kind == LXN_EXTERNAL &&
+                 lxs_rt_of(S, r->d) != -1)
+            no = "a function of the runtime is not a value";
         else if (r->d && lxs_node(S, r->d)->kind == LXN_EXTERNAL)
             no = "a routine of C is not a value (routines go to C as values "
                  "later, as callbacks)";

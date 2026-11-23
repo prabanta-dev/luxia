@@ -800,7 +800,8 @@ is a compile-time error.
 - A name declared in an inner scope (a routine, a statement list, the
   body of a `for`) may **hide** a name of an enclosing scope, as in Pascal
   and Ada. Within one scope the case rule of § 2.2 applies. The names of
-  the language (§ 9) cannot be declared again anywhere.
+  the language (§ 9) cannot be declared again, but by a unit at its own
+  level, reached then only qualified (§ 9).
 - A type or a constant defined in terms of itself is an error. A record
   cannot contain itself except through a pointer.
 - The names of the units a file uses, and the names of their
@@ -1698,9 +1699,24 @@ end Report;
 
 ## 9. The predefined library
 
-The names of the library are visible everywhere and cannot be
-redeclared, except `str`, to which a program adds meanings for its types
-(§ 9.4).
+The names of the language (its types, constants, exceptions and the
+routines of this section) are visible everywhere, and a name written
+alone that is one of them is always the language's: in a program, in a
+unit, in a routine.
+
+- A program, and a routine anywhere, cannot declare them again.
+- **A unit** (of the library or of anyone) may declare one at its own
+  level, in its interface or its implementation, as a type, a constant,
+  a variable, a value of an enumeration or a routine: its name is then
+  reached **only qualified**, `Files.Write`, in the unit itself too
+  (§ 11.2), while `write` alone stays the language's. A `uses` never
+  brings it in unqualified, two units declaring it are no ambiguity
+  (§ 11.3), and a new name of the language never stops a unit from
+  compiling nor changes what it means. Written alone with the spelling
+  of the unit (`Write` for `write`), the name is the language's spelt
+  otherwise, an error (§ 2.2), with a note at the unit's declaration.
+- `str` is never declared again: a program or a unit adds meanings to it
+  for its types (§ 9.4).
 
 ### 9.1 Output
 
@@ -2288,7 +2304,8 @@ end Geometry.
   its values. (Private types, with hidden fields, are planned with
   objects: Appendix A.)
 - A unit may name its own declarations qualified, `Geometry.calls`
-  inside `Geometry`, as in Delphi.
+  inside `Geometry`, as in Delphi; a name of the language that it
+  declares it names only so (§ 9).
 
 ### 11.3 `uses` and visibility
 
@@ -2353,6 +2370,11 @@ end.
   have it. Otherwise `Text.X` in that file could mean something other
   than the unit. For the same reason a unit cannot declare its own
   name. A unit cannot have the name of a name of the language (§ 9).
+- **A name of the language declared by a unit** (§ 9) is never a name of
+  the unit written directly: `Write` alone is the language's `write`
+  (spelt otherwise, an error) in every file, and the unit's routine is
+  `Files.Write`. It takes no part in the levels, in ambiguity or in
+  hiding.
 - The case rule (§ 2.2) holds across files: a name is spelt as declared,
   and a unit is named in `uses` as its file declares it.
 - **Variables of an interface are read-only outside their unit**: they

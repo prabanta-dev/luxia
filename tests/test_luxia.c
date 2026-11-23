@@ -3765,6 +3765,99 @@ static const unit_case unit_cases[] = {
      "RangeError 3\n2\nend\n",
      "ok",
      ""},
+    /* external "runtime" (§ 8.5, D148): only in the units of the library,
+       a function the runtime has, named, with its profile (a span, a
+       String whole, var and out as addresses, an enumeration as its
+       position); not a value; not C for no_external */
+    {{{"p.luxia",
+       "program P;\nuses Rt;\nprocedure Gone(s: String); external "
+       "\"runtime\" name \"file_delete\";\ntype Remover = procedure(s: "
+       "String);\nvar r: Remover;\nbegin\n  r := Rt.Gone;\nend P."},
+      {"std/rt.luxia",
+       "unit Rt;\ninterface\ntype Mode = (A, B, C);\n"
+       "procedure Gone(s: String); external \"runtime\" name \"file_delete\";\n"
+       "function Ok1(f: Int64; var a: array[Int64 range <>] of Byte; from, "
+       "count: Int64): Int64; external \"runtime\" name \"file_read\";\n"
+       "procedure Ok2(f: Int64; s: String); external \"runtime\" name "
+       "\"file_write\";\n"
+       "function Ok3(s: String; m: Mode): Int64; external \"runtime\" name "
+       "\"file_open\";\n"
+       "function Ok4(f: Int64; out s: String): Boolean; external \"runtime\" "
+       "name \"file_read_line\";\n"
+       "function No1(n: Int64): Int64; external \"runtime\" name \"no_such\";\n"
+       "function No2(n: Int64): Int64; external \"runtime\" name "
+       "\"file_close\";\n"
+       "function No3(f: Int64; a: array[Int64 range <>] of Byte; from, count: "
+       "Int64): Int64; external \"runtime\" name \"file_read\";\n"
+       "function No4(f: Int64; s: String; from, count: Int64): Int64; "
+       "external \"runtime\" name \"file_read\";\n"
+       "procedure No5(s: String); external \"runtime\";\n"
+       "procedure No6(f: Int64; s: String; t: String); external \"runtime\" "
+       "name \"file_write\";\n"
+       "implementation\nend Rt."}},
+     "",
+     "errors",
+     "L0109@p.luxia:3:28 L0109@std/rt.luxia:9:32 L0109@std/rt.luxia:10:32 "
+     "L0109@std/rt.luxia:11:86 L0109@std/rt.luxia:12:63 "
+     "L0109@std/rt.luxia:13:27 L0109@std/rt.luxia:14:48 L0104@p.luxia:7:11 "
+     "w:L0071@p.luxia:3:11"},
+    /* the program under no_external reaches the runtime through the
+       library: no boundary with C */
+    {{{"p.luxia",
+       "program P;\nuses Rt;\npragma restrictions(no_external);\nbegin\n  "
+       "writeln(Rt.There(\"/nonexistent/x\"));\nend P."},
+      {"std/rt.luxia",
+       "unit Rt;\ninterface\nfunction There(s: String): Boolean; external "
+       "\"runtime\" name \"file_exists\";\nimplementation\nend Rt."}},
+     "false\n",
+     "ok",
+     ""},
+    /* a unit, of the program or of the library, declares names of the
+       language at its own level (§ 9, § 11.3): written alone they stay
+       the language's, also in the unit; the unit's are Unit.Name; two
+       units with the same one are no ambiguity; a routine of overload
+       among them; a private one reached qualified in its unit */
+    {{{"p.luxia",
+       "program P;\nuses Pen, Log;\nvar b: Pen.Byte := 3;\n  c: Byte := "
+       "200;\nbegin\n  Pen.Write(\"a\");\n  write(\"b\");\n  "
+       "Log.Write(5);\n  writeln(length(\"abc\"), \" \", "
+       "Pen.length(\"abc\"), \" \", Pen.count, \" \", Int64(b), \" \", c, "
+       "\" \", Log.lines);\nend P."},
+      {"pen.luxia",
+       "unit Pen;\ninterface\ntype Byte = new Int64;\nvar count: Int64 := "
+       "0;\nprocedure Write(s: String);\nfunction length(s: String): "
+       "Int64;\nimplementation\nuses Log;\nvar ord: Int64 := 7;\nprocedure "
+       "Write(s: String);\nbegin\n  write(\"<\", s, \">\");\n  "
+       "Log.Write(s);\n  Pen.count := count + Pen.length(s);\nend "
+       "Write;\nfunction length(s: String): Int64;\nbegin\n  return "
+       "length(s) + Pen.ord;\nend length;\nend Pen."},
+      {"std/log.luxia",
+       "unit Log;\ninterface\nvar lines: Int64 := 0;\nprocedure Write(s: "
+       "String); overload;\nprocedure Write(n: Int64); "
+       "overload;\nimplementation\nprocedure Write(s: String); "
+       "overload;\nbegin\n  Log.lines := lines + 1;\nend Write;\nprocedure "
+       "Write(n: Int64); overload;\nbegin\n  Log.lines := lines + "
+       "n;\nend Write;\nend Log."}},
+     "<a>b3 10 8 3 200 6\n",
+     "ok",
+     ""},
+    /* where a name of the language cannot be declared: in a program, in
+       a routine of a unit (a local, a parameter), str anywhere; written
+       alone as the unit spells it: the language's, misspelt, with a note
+       at the unit's (§ 9, § 11.3) */
+    {{{"p.luxia",
+       "program P;\nuses Pen;\nvar length: Int64;\nbegin\n  "
+       "Write(\"x\");\nend P."},
+      {"pen.luxia",
+       "unit Pen;\ninterface\nvar str: Int64;\nprocedure Write(s: "
+       "String);\nimplementation\nprocedure Write(s: String);\nvar ord: "
+       "Int64;\nbegin\n  Write(s);\nend Write;\nprocedure Show(write: "
+       "Int64);\nbegin\nend Show;\nend Pen."}},
+     "",
+     "errors",
+     "L0023@p.luxia:3:5 L0023@pen.luxia:3:5 L0023@pen.luxia:11:16 "
+     "L0023@pen.luxia:7:5 L0022@pen.luxia:9:3 n:@pen.luxia:4:11 "
+     "L0022@p.luxia:5:3 n:@pen.luxia:4:11 w:L0077@p.luxia:2:6"},
 };
 
 /* the reader of the files of a case */
@@ -4002,57 +4095,198 @@ static int test_eq_names(void)
     return failures;
 }
 
+/* one case of units: at -O0 and -O1, what it prints and how it ends,
+   the diagnoses; the program's arguments argv */
+static int run_unit_case(const unit_case *c, const char *what, size_t i,
+                         int argc, char **argv)
+{
+    char out_end[2][256] = {"errors", "errors"};
+    char *out[2] = {NULL, NULL};
+    size_t len[2] = {0, 0};
+    diag_text dt = {{0}, 0};
+    for (int level = 0; level < 2; level++) {
+        limba_luxia_options o = {0};
+        o.verify = true; /* an IR not valid is an error, not a crash */
+        o.level = level;
+        o.read_unit = case_reader;
+        o.read_ctx = (void *)c;
+        diag_text mine = {{0}, 0};
+        limba_luxia_consumer k = {0};
+        k.ctx = &mine;
+        k.diag = case_diag;
+        k.keep_bodies = true;
+        limba_module *m = NULL;
+        limba_luxia_compile_text(c->f[0].name, c->f[0].text,
+                                 strlen(c->f[0].text), &o, &k, &m);
+        if (level == 0)
+            dt = mine;
+        if (m) {
+            out[level] = run_module(m, NULL, 0, argc, argv, out_end[level],
+                                    sizeof(out_end[level]), &len[level]);
+            limba_module_free(m);
+        }
+    }
+    const char *o = out[0] ? out[0] : "";
+    char *at = strstr(out_end[0], " at ");
+    if (at && !strstr(c->end, " at "))
+        *at = 0;
+    bool optdiff =
+        len[0] != len[1] || (len[0] && memcmp(out[0], out[1], len[0]));
+    int failures = 0;
+    if (strcmp(o, c->out) || strcmp(out_end[0], c->end) ||
+        strcmp(dt.buf, c->diags) || optdiff) {
+        fprintf(stderr,
+                "test_luxia: %s case %zu\n  printed  \"%s\"\n  expected "
+                "\"%s\"\n  ended    %s\n  expected %s\n  diags    %s\n  "
+                "expected %s%s\n",
+                what, i, o, c->out, out_end[0], c->end, dt.buf, c->diags,
+                optdiff ? "\n  -O1 printed something else" : "");
+        failures++;
+    }
+    free(out[0]);
+    free(out[1]);
+    return failures;
+}
+
 static int test_units(void)
 {
     int failures = test_unit_module() + test_unit_files() +
                    test_luxia_command() + test_eq_names();
-    for (size_t i = 0; i < COUNT(unit_cases); i++) {
-        const unit_case *c = &unit_cases[i];
-        char out_end[2][256] = {"errors", "errors"};
-        char *out[2] = {NULL, NULL};
-        size_t len[2] = {0, 0};
-        diag_text dt = {{0}, 0};
-        for (int level = 0; level < 2; level++) {
-            limba_luxia_options o = {0};
-            o.verify = true; /* an IR not valid is an error, not a crash */
-            o.level = level;
-            o.read_unit = case_reader;
-            o.read_ctx = (void *)c;
-            diag_text mine = {{0}, 0};
-            limba_luxia_consumer k = {0};
-            k.ctx = &mine;
-            k.diag = case_diag;
-            k.keep_bodies = true;
-            limba_module *m = NULL;
-            limba_luxia_compile_text(c->f[0].name, c->f[0].text,
-                                     strlen(c->f[0].text), &o, &k, &m);
-            if (level == 0)
-                dt = mine;
-            if (m) {
-                out[level] = run_module(m, NULL, 0, 0, NULL, out_end[level],
-                                        sizeof(out_end[level]), &len[level]);
-                limba_module_free(m);
-            }
-        }
-        const char *o = out[0] ? out[0] : "";
-        char *at = strstr(out_end[0], " at ");
-        if (at && !strstr(c->end, " at "))
-            *at = 0;
-        bool optdiff =
-            len[0] != len[1] || (len[0] && memcmp(out[0], out[1], len[0]));
-        if (strcmp(o, c->out) || strcmp(out_end[0], c->end) ||
-            strcmp(dt.buf, c->diags) || optdiff) {
-            fprintf(stderr,
-                    "test_luxia: unit case %zu\n  printed  \"%s\"\n  expected "
-                    "\"%s\"\n  ended    %s\n  expected %s\n  diags    %s\n  "
-                    "expected %s%s\n",
-                    i, o, c->out, out_end[0], c->end, dt.buf, c->diags,
-                    optdiff ? "\n  -O1 printed something else" : "");
-            failures++;
-        }
-        free(out[0]);
-        free(out[1]);
+    for (size_t i = 0; i < COUNT(unit_cases); i++)
+        failures += run_unit_case(&unit_cases[i], "unit", i, 0, NULL);
+    return failures;
+}
+
+/* ---- the unit Files of the library (stdlib/files.luxia, D147) ---- */
+
+/* the programs of the files: their first argument a directory of their
+   own, under $HOME/tmp/luxia */
+static const struct {
+    const char *text, *out, *end;
+} file_cases[] = {
+    /* a file written, appended, read by lines and by bytes, removed; under no_external */
+    {"program P;\n"
+     "uses Files;\n"
+     "pragma restrictions(no_external);\n"
+     "var f: File; s: String; n: Int64;\n"
+     "  b: array[Int64 range 1..8] of Byte;\n"
+     "begin\n"
+     "  f := Open(arg(1) & \"/a.txt\", Writing);\n"
+     "  WriteLine(f, \"one\");\n"
+     "  Files.Write(f, \"two\");\n"
+     "  WriteLine(f, \"\");\n"
+     "  for var i: Int64 := 1 to 8 do b[i] := Byte(64 + i); end;\n"
+     "  Files.WriteBytes(f, b, 2, 3);\n"
+     "  Close(f);\n"
+     "  f := Open(arg(1) & \"/a.txt\", Appending);\n"
+     "  WriteLine(f, \"+\");\n"
+     "  Close(f);\n"
+     "  writeln(Exists(arg(1) & \"/a.txt\"));\n"
+     "  f := Open(arg(1) & \"/a.txt\");\n"
+     "  while Files.ReadLine(f, s) do writeln(\"[\", s, \"]\"); end;\n"
+     "  writeln(Files.ReadLine(f, s), length(s));\n"
+     "  Close(f);\n"
+     "  f := Open(arg(1) & \"/a.txt\");\n"
+     "  n := Files.ReadBytes(f, b, 3, 6);\n"
+     "  write(n, \" \");\n"
+     "  for var i: Int64 := 3 to 2 + n do write(chr(b[i])); end;\n"
+     "  writeln();\n"
+     "  Close(f);\n"
+     "  Delete(arg(1) & \"/a.txt\");\n"
+     "  writeln(Exists(arg(1) & \"/a.txt\"));\n"
+     "end P.",
+     "true\n[one]\n[two]\n[BCD+]\nfalse0\n6 one\ntw\nfalse\n",
+     "ok"},
+    /* the errors, all taken: a file missing, a 0 byte in the name, reading a file opened for writing and the other way, a file closed, a span outside the array, a directory */
+    {"program P;\n"
+     "uses Files;\n"
+     "var f, g: File; s: String;\n"
+     "  b: array[Int64 range 1..4] of Byte;\n"
+     "  name: String;\n"
+     "begin\n"
+     "  name := arg(1) & \"/b.txt\";\n"
+     "  try f := Open(name); except when InputOutputError var e: writeln(e.name, \" \", e.message = \"not found: \" & name); end;\n"
+     "  try Delete(name); except when var e: writeln(e.name, \" \", e.message = \"not found: \" & name); end;\n"
+     "  try f := Open(name & chr(0)); except when var e: writeln(e.name, \" \", e.message); end;\n"
+     "  f := Open(name, Writing);\n"
+     "  try writeln(Files.ReadLine(f, s)); except when var e: writeln(e.name, \" \", e.message); end;\n"
+     "  Close(f);\n"
+     "  try Close(f); except when var e: writeln(e.name, \" \", e.message); end;\n"
+     "  try Files.Write(f, \"x\"); except when var e: writeln(e.name, \" \", e.message); end;\n"
+     "  g := Open(name);\n"
+     "  try WriteLine(g, \"x\"); except when var e: writeln(e.name, \" \", e.message); end;\n"
+     "  try writeln(Files.ReadBytes(g, b, 2, 4)); except when var e: writeln(e.name, \" \", e.message); end;\n"
+     "  try writeln(Files.ReadBytes(g, b, 1, -1)); except when var e: writeln(e.name, \" \", e.message); end;\n"
+     "  writeln(Files.ReadBytes(g, b, 5, 0));\n"
+     "  Close(g);\n"
+     "  try f := Open(arg(1)); except when var e: writeln(e.name, \" \", e.message = \"cannot open: \" & arg(1)); end;\n"
+     "  Delete(name);\n"
+     "end P.",
+     "InputOutputError true\nInputOutputError true\nRangeError value out of "
+     "range\nInputOutputError input/output error\nProgramError invalid file "
+     "handle\nProgramError invalid file handle\nInputOutputError input/output "
+     "error\nIndexError index out of range\nRangeError value out of "
+     "range\n0\nInputOutputError true\n",
+     "ok"},
+    /* an exception no one takes: the file still open is written at the end */
+    {"program P;\n"
+     "uses Files;\n"
+     "var f: File;\n"
+     "begin\n"
+     "  f := Open(arg(1) & \"/c.txt\", Writing);\n"
+     "  WriteLine(f, \"kept at the end\");\n"
+     "  f := Open(arg(1) & \"/none.txt\");\n"
+     "end P.",
+     "",
+     "trap 107 at 7:8"},
+    /* what the program before wrote (at -O0 and -O1) */
+    {"program P;\n"
+     "uses Files;\n"
+     "var f: File; s: String;\n"
+     "begin\n"
+     "  f := Open(arg(1) & \"/c.txt\");\n"
+     "  while Files.ReadLine(f, s) do writeln(s); end;\n"
+     "  Close(f);\n"
+     "end P.",
+     "kept at the end\n",
+     "ok"},
+};
+
+static int test_files(void)
+{
+    size_t llen;
+    char *lib = slurp("stdlib/files.luxia", &llen);
+    if (!lib) {
+        fprintf(stderr, "test_luxia: no stdlib/files.luxia\n");
+        return 1;
     }
+    const char *home = getenv("HOME");
+    char dir[4096];
+    snprintf(dir, sizeof(dir), "%s/tmp", home ? home : ".");
+    mkdir(dir, 0777);
+    snprintf(dir, sizeof(dir), "%s/tmp/luxia", home ? home : ".");
+    mkdir(dir, 0777);
+    snprintf(dir, sizeof(dir), "%s/tmp/luxia/test_luxia-files-%ld",
+             home ? home : ".", (long)getpid());
+    mkdir(dir, 0777);
+    char *argv[] = {dir, NULL};
+    int failures = 0;
+    for (size_t i = 0; i < COUNT(file_cases); i++) {
+        unit_case c = {{{"p.luxia", file_cases[i].text},
+                        {"std/files.luxia", lib}},
+                       file_cases[i].out,
+                       file_cases[i].end,
+                       ""};
+        failures += run_unit_case(&c, "file", i, 1, argv);
+    }
+    char made[4200];
+    snprintf(made, sizeof(made), "%s/c.txt", dir);
+    unlink(made); /* of the third program, read by the fourth */
+    if (rmdir(dir) != 0) {
+        fprintf(stderr, "test_luxia: files: %s not left empty\n", dir);
+        failures++;
+    }
+    free(lib);
     return failures;
 }
 
@@ -4070,13 +4304,15 @@ int main(void)
     failures += test_ffi(&ffi);
     failures += test_run();
     failures += test_units();
+    failures += test_files();
     failures += test_io();
     failures += test_random();
     printf("test_luxia: %zu lexer, %zu expression, %zu program, %zu "
-           "semantic, %zu run, %zu unit and %zu input cases, %u valid "
+           "semantic, %zu run, %zu unit, %zu file and %zu input cases, "
+           "%u valid "
            "programs, %u calling C, report and limit, %d failures\n",
            COUNT(lex_cases), COUNT(expr_cases), COUNT(program_cases),
            COUNT(sema_cases), COUNT(run_cases), COUNT(unit_cases),
-           COUNT(io_cases), programs, ffi, failures);
+           COUNT(file_cases), COUNT(io_cases), programs, ffi, failures);
     return failures ? 1 : 0;
 }

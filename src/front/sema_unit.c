@@ -182,9 +182,56 @@ uint32_t lxs_heading(const limba_lxs *S, limba_sym s)
 
 /* ---- names ---- */
 
+bool lxs_unit_level(const limba_lxs *S, uint32_t scope)
+{
+    if (!S->nunits)
+        return false;
+    bool impl;
+    const limba_lxs_unit *f = &S->units[lxs_unit_of(S, scope, &impl)];
+    return f->intf && (scope == f->intf || scope == f->impl);
+}
+
+void lxs_lang_note(limba_lxs *S, uint32_t scope, uint32_t name)
+{
+    if (!S->nunits)
+        return;
+    bool impl;
+    uint32_t u = lxs_unit_of(S, scope, &impl), v = u;
+    const limba_lxs_unit *f = &S->units[u];
+    limba_sym c = 0;
+    if (f->intf) {
+        c = impl && f->impl ? limba_sym_local(&S->st, f->impl, name) : 0;
+        if (!c)
+            c = limba_sym_local(&S->st, f->intf, name);
+    }
+    for (uint32_t k = 0; !(c && (S->st.sym[c].flags & LXS_LANGNAME)); k++) {
+        c = 0;
+        uint32_t ref = visible_ref(S, u, impl, k);
+        if (!ref)
+            return;
+        v = S->t->node[ref].b;
+        if (!v || !S->units[v - 1].intf)
+            continue;
+        v--;
+        c = limba_sym_local(&S->st, S->units[v].intf, name);
+    }
+    const char *a;
+    uint32_t na;
+    name_of(S, v, &a, &na);
+    size_t n;
+    const char *sp = lxs_spell(S, c, &n);
+    lxs_note(S, S->st.sym[c].loc, S->st.sym[c].len,
+             "'%.*s' of '%.*s' is written %.*s.%.*s", (int)n, sp, (int)na, a,
+             (int)na, a, (int)n, sp);
+}
+
 limba_sym lxs_find(limba_lxs *S, uint32_t scope, uint32_t name, uint32_t node)
 {
     limba_sym s = limba_sym_lookup(&S->st, scope, name);
+    /* a name of the language declared by the unit: written alone, it is
+       the language's (§ 9, § 11.3) */
+    if (s && (S->st.sym[s].flags & LXS_LANGNAME))
+        s = limba_sym_local(&S->st, S->universe, name);
     if ((s && S->st.sym[s].scope != S->universe) || !S->nunits)
         return s;
     bool impl;
@@ -203,7 +250,7 @@ limba_sym lxs_find(limba_lxs *S, uint32_t scope, uint32_t name, uint32_t node)
             continue;
         v--;
         limba_sym c = limba_sym_local(&S->st, S->units[v].intf, name);
-        if (!c)
+        if (!c || (S->st.sym[c].flags & LXS_LANGNAME))
             continue;
         int lev = S->units[v].library ? 2 : 1;
         if (lev < level) {
@@ -317,7 +364,7 @@ uint32_t lxs_unit_heads(limba_lxs *S, uint32_t scope, uint32_t name,
             continue;
         v--;
         limba_sym c = limba_sym_local(&S->st, S->units[v].intf, name);
-        if (!c)
+        if (!c || (S->st.sym[c].flags & LXS_LANGNAME))
             continue;
         uint32_t m = n;
         LIMBA_GROW(*heads, n, cap);
@@ -402,6 +449,7 @@ static void hides_check(limba_lxs *S)
             const limba_lx_node *x = &S->t->node[i];
             limba_sym s = x->kind == LXN_NAME ? S->sym[i] : 0;
             if (!s || S->st.sym[s].loc != x->loc ||
+                (S->st.sym[s].flags & LXS_LANGNAME) ||
                 (S->st.sym[s].scope != f->intf &&
                  S->st.sym[s].scope != f->impl))
                 continue;
@@ -1047,7 +1095,8 @@ static void library_c(limba_lxs *S, const uint32_t *first, uint32_t ns)
         if (!first[x] || y->kind != LIMBA_LSYM_ROUTINE || !y->node)
             continue;
         const limba_lx_node *r = &S->t->node[y->node];
-        if (!r->d || S->t->node[r->d].kind != LXN_EXTERNAL)
+        if (!r->d || S->t->node[r->d].kind != LXN_EXTERNAL ||
+            lxs_rt_of(S, r->d) != -1) /* the runtime is not C (§ 10.4) */
             continue;
         bool impl;
         if (!S->units[lxs_unit_of(S, y->scope, &impl)].library)

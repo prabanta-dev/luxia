@@ -264,7 +264,10 @@ if [ "$ACTION" = test ]; then
     # there, its standard error in <name>.err and its exit status in
     # <name>.status (0 otherwise); its input <name>.in (nothing otherwise);
     # the options of luxia before the source in <name>.opts, one a line
-    # (none otherwise), paths from the root of the repository
+    # (none otherwise), paths from the root of the repository; the
+    # arguments of the program in <name>.args, one a line, @OUT@ the
+    # directory of the outputs (the programs that make files make them
+    # there)
     n=0
     for src in tests/run/*.luxia; do
         [ -f "$src" ] || continue
@@ -274,10 +277,13 @@ if [ "$ACTION" = test ]; then
         [ -f "tests/run/$name.in" ] && in="tests/run/$name.in"
         opts=()
         [ -f "tests/run/$name.opts" ] && mapfile -t opts <"tests/run/$name.opts"
+        args=()
+        [ -f "tests/run/$name.args" ] && mapfile -t args <"tests/run/$name.args"
+        args=("${args[@]//@OUT@/$out}")
         want=0
         [ -f "$exp.status" ] && want=$(cat "$exp.status")
         got=0
-        "$luxia" --verify "${opts[@]}" "$src" <"$in" >"$out/$name.out" \
+        "$luxia" --verify "${opts[@]}" "$src" "${args[@]}" <"$in" >"$out/$name.out" \
             2>"$out/$name.err" || got=$?
         n=$((n + 1))
         if [ "$got" != "$want" ] || ! cmp -s "$exp.out" "$out/$name.out" ||

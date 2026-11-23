@@ -433,6 +433,8 @@ limba_sym lxs_lookup(limba_lxs *S, uint32_t scope, uint32_t node)
         lxs_error(S, LXE_SPELLING, node,
                   "'%.*s' is declared as '%.*s': write it the same way", (int)n,
                   use, (int)dn, decl);
+        if (q == UINT32_MAX && S->st.sym[s].scope == S->universe)
+            lxs_lang_note(S, scope, x->a);
         S->sym[node] = 0;
         return 0;
     }
@@ -471,17 +473,25 @@ limba_sym lxs_declare(limba_lxs *S, uint32_t scope, uint32_t name_node,
     const char *text = text_at(S, x->loc);
     uint32_t n = ident_len(text);
     limba_sym dup = limba_sym_local(&S->st, S->universe, x->a);
+    /* a unit may declare a name of the language, at its own level: the
+       name written alone stays the language's, the unit's is Unit.Name
+       (§ 9, § 11.3) */
+    bool lang = false;
     if (dup) {
-        if (S->st.sym[dup].kind == LIMBA_LSYM_BUILTIN &&
-            S->st.sym[dup].value == LXB_STR)
+        bool is_str = S->st.sym[dup].kind == LIMBA_LSYM_BUILTIN &&
+                      S->st.sym[dup].value == LXB_STR;
+        if (is_str)
             lxs_error(S, LXE_DUPLICATE, name_node,
                       "'%.*s' is a name of the language: a str for a type "
                       "of the program is added with overload",
                       (int)n, text);
+        else if (lxs_unit_level(S, scope))
+            lang = true;
         else
             lxs_error(S, LXE_DUPLICATE, name_node,
                       "'%.*s' is a name of the language", (int)n, text);
-        return 0;
+        if (!lang)
+            return 0;
     }
     if (!lxs_unit_declare(S, scope, name_node))
         return 0;
@@ -494,6 +504,8 @@ limba_sym lxs_declare(limba_lxs *S, uint32_t scope, uint32_t name_node,
         return 0;
     }
     S->st.sym[s].node = decl;
+    if (lang)
+        S->st.sym[s].flags |= LXS_LANGNAME;
     S->sym[name_node] = s;
     return s;
 }
@@ -1657,4 +1669,201 @@ void lxs_c_routine(limba_lxs *S, limba_sym s)
     if (x->c && r->elem && !c_scalar(S, r->elem))
         lxs_error(S, LXE_C_BOUNDARY, x->c, "%s does not cross to C%s",
                   lxs_tname(S, r->elem, tb), c_why(S, r->elem));
+}
+
+/* ---- the boundary of the library with the runtime (§ 8.5, D148) ---- */
+
+int lxs_rt_of(const limba_lxs *S, uint32_t ext)
+{
+    const limba_lx_node *e = &S->t->node[ext];
+    size_t n;
+    const char *lib = limba_strtab_get(S->lx->strings, e->a, &n);
+    if (n != 7 || memcmp(lib, "runtime", 7))
+        return -1;
+    if (!e->c)
+        return -2;
+    const char *f = limba_strtab_get(S->lx->strings, e->b, &n);
+    for (int i = 0; i < LIMBA_RT_COUNT; i++)
+        if (strlen(limba_rts[i].name) == n && !memcmp(limba_rts[i].name, f, n))
+            return i;
+    return -2;
+}
+
+/* the IR type of a scalar the runtime takes or gives, NULL if none */
+static const char *rt_scalar(const limba_lxs *S, limba_ltype t)
+{
+    const limba_typeinfo *x = lxs_ty(S, t);
+    switch (x->kind) {
+    case LIMBA_LTK_INT:
+        return x->bits == 8    ? "i8"
+               : x->bits == 16 ? "i16"
+               : x->bits == 32 ? "i32"
+                               : "i64";
+    case LIMBA_LTK_ENUM:
+        return x->size == 1 ? "i8" : x->size == 2 ? "i16" : "i32";
+    case LIMBA_LTK_BOOL:
+        return "i1";
+    case LIMBA_LTK_CHAR:
+        return "i32";
+    case LIMBA_LTK_FLOAT:
+        return x->bits == 32 ? "f32" : "f64";
+    case LIMBA_LTK_STRING:
+        return "str";
+    case LIMBA_LTK_BIGINT:
+        return "ref";
+    default:
+        return NULL;
+    }
+}
+
+/* is parameter k of sig a span: an open array of Bytes, or a String in,
+   then two Int64 in */
+static bool rt_span(const limba_lxs *S, limba_ltype sig, uint32_t k)
+{
+    const limba_typeinfo *r = lxs_ty(S, sig);
+    if (k + 2 >= r->count)
+        return false;
+    limba_param p = S->ts.param[r->first + k];
+    const limba_typeinfo *x = lxs_ty(S, p.type);
+    bool bytes = x->kind == LIMBA_LTK_OPEN && x->elem == S->ty_bits[0] &&
+                 !(x->flags & LIMBA_TF_MULTI);
+    bool text = x->kind == LIMBA_LTK_STRING && p.mode == LXS_IN;
+    if (!bytes && !text)
+        return false;
+    for (uint32_t j = 1; j <= 2; j++) {
+        limba_param q = S->ts.param[r->first + k + j];
+        if (q.mode != LXS_IN || lxs_base(S, q.type) != S->ty_int[3])
+            return false;
+    }
+    return true;
+}
+
+/* the next type of a signature of the runtime, "(i64, ptr) -> i1", from
+ *at: its length, 0 at the end of the parameters */
+static size_t rt_next(const char *sig, size_t *at)
+{
+    size_t i = *at;
+    while (sig[i] == '(' || sig[i] == ',' || sig[i] == ' ')
+        i++;
+    size_t j = i;
+    while (sig[j] && sig[j] != ',' && sig[j] != ')')
+        j++;
+    *at = i;
+    return sig[i] == ')' ? 0 : j - i;
+}
+
+static bool rt_is(const char *sig, size_t *at, const char *want)
+{
+    size_t n = rt_next(sig, at);
+    if (!n || strlen(want) != n || memcmp(sig + *at, want, n))
+        return false;
+    *at += n;
+    return true;
+}
+
+bool lxs_rt_plan(const limba_lxs *S, limba_ltype sig, int id, uint8_t *plan,
+                 uint8_t *bits)
+{
+    const char *rs = limba_rts[id].sig;
+    bool writes = (limba_rts[id].attrs & LIMBA_RTA_WRITES_MEM) != 0;
+    const limba_typeinfo *r = lxs_ty(S, sig);
+    size_t at = 0;
+    for (uint32_t k = 0; k < r->count; k++) {
+        limba_param p = S->ts.param[r->first + k];
+        const limba_typeinfo *x = lxs_ty(S, p.type);
+        bits[k] = 0;
+        if (rt_span(S, sig, k)) {
+            /* what the runtime writes is an array given var */
+            if (writes && (x->kind == LIMBA_LTK_STRING || p.mode == LXS_IN))
+                return false;
+            if (!rt_is(rs, &at, "ptr") || !rt_is(rs, &at, "i64"))
+                return false;
+            plan[k] = LXS_RT_SPAN;
+            plan[k + 1] = plan[k + 2] = LXS_RT_SPAN;
+            k += 2;
+            continue;
+        }
+        if (p.mode != LXS_IN) {
+            if (!rt_scalar(S, p.type) || !rt_is(rs, &at, "ptr"))
+                return false;
+            plan[k] = LXS_RT_ADDR;
+            continue;
+        }
+        if (x->kind == LIMBA_LTK_STRING) {
+            size_t a2 = at;
+            if (rt_is(rs, &at, "str")) {
+                plan[k] = LXS_RT_VALUE;
+                continue;
+            }
+            at = a2;
+            if (writes || !rt_is(rs, &at, "ptr") || !rt_is(rs, &at, "i64"))
+                return false;
+            plan[k] = LXS_RT_WHOLE; /* its bytes, all of them */
+            continue;
+        }
+        if (x->kind == LIMBA_LTK_ENUM) {
+            /* an enumeration goes as its position */
+            size_t n = rt_next(rs, &at);
+            static const char *const ints[] = {"i8", "i16", "i32", "i64"};
+            plan[k] = 0;
+            for (unsigned j = 0; j < 4; j++)
+                if (n == strlen(ints[j]) && !memcmp(rs + at, ints[j], n)) {
+                    plan[k] = LXS_RT_ENUM;
+                    bits[k] = (uint8_t)(8u << j);
+                }
+            if (!plan[k])
+                return false;
+            at += n;
+            continue;
+        }
+        const char *t = rt_scalar(S, p.type);
+        if (!t || !rt_is(rs, &at, t))
+            return false;
+        plan[k] = LXS_RT_VALUE;
+    }
+    if (rt_next(rs, &at))
+        return false; /* more parameters */
+    const char *res = strstr(rs, "-> ");
+    const char *mine = r->elem == S->ts.void_ ? "void"
+                       : r->elem              ? rt_scalar(S, r->elem)
+                                              : NULL;
+    return res && mine && !strcmp(res + 3, mine);
+}
+
+void lxs_rt_routine(limba_lxs *S, limba_sym s)
+{
+    limba_symbol *y = &S->st.sym[s];
+    limba_lx_node *x = lxs_node(S, y->node);
+    bool impl;
+    uint32_t u = lxs_unit_of(S, y->scope, &impl);
+    if (!S->nunits || !S->units[u].library) {
+        lxs_error(S, LXE_RAISE_PLACE, x->d,
+                  "external \"runtime\" is the boundary of the standard "
+                  "library with the runtime: only its units declare it");
+        return;
+    }
+    int id = lxs_rt_of(S, x->d);
+    size_t ln;
+    const char *f = limba_strtab_get(S->lx->strings, lxs_node(S, x->d)->b, &ln);
+    if (id < 0) {
+        if (!lxs_node(S, x->d)->c)
+            lxs_error(S, LXE_RAISE_PLACE, x->d,
+                      "external \"runtime\" names its function: name \"f\"");
+        else
+            lxs_error(S, LXE_RAISE_PLACE, x->d,
+                      "the runtime has no function '%.*s'", (int)ln, f);
+        return;
+    }
+    limba_ltype sig = y->type;
+    if (!sig)
+        return;
+    uint32_t n = lxs_ty(S, sig)->count;
+    uint8_t *plan = limba_xcalloc(n + 1, 1), *bits = limba_xcalloc(n + 1, 1);
+    if (!lxs_rt_plan(S, sig, id, plan, bits))
+        lxs_error(S, LXE_RAISE_PLACE, x->d,
+                  "the profile is not that of the function '%.*s' of the "
+                  "runtime, %s",
+                  (int)ln, f, limba_rts[id].sig);
+    free(plan);
+    free(bits);
 }

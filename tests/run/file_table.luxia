@@ -1,0 +1,94 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+// The unit Files of the standard library (luxia --stdlib=stdlib): a
+// table written as text, appended, read back by lines and summed, its
+// bytes copied into another file in pieces through an array; the errors
+// taken. Write, ReadLine, ReadBytes and WriteBytes are names of the
+// language too: those of Files are written qualified, and write alone is
+// the language's. Its first argument is the directory of the files it
+// makes.
+program file_table;
+
+uses Files;
+
+var dir: String;
+
+// the sum of the numbers after the comma of each line
+function Total(name: String): Int64;
+var f: File;
+  line: String;
+  sum, n: Int64 := 0;
+begin
+  f := Open(name);
+  try
+    while Files.ReadLine(f, line) do
+      for var i: Int64 := 1 to length(line) do
+        if line[i] = 44 and val(copy(line, i + 1, length(line) - i), n) then
+          sum := sum + n; // after the comma, byte 44
+        end;
+      end;
+    end;
+  finally
+    Close(f);
+  end;
+  return sum;
+end Total;
+
+// a copy of source in target, through a buffer of 5 bytes; how many bytes
+function CopyFile(source, target: String): Int64;
+var src, dst: File;
+  buf: array[Int64 range 1..5] of Byte;
+  n, total: Int64 := 0;
+begin
+  src := Open(source);
+  dst := Open(target, Writing);
+  loop
+    n := Files.ReadBytes(src, buf, 1, 5);
+    exit when n = 0;
+    Files.WriteBytes(dst, buf, 1, n);
+    total := total + n;
+  end;
+  Close(src);
+  Close(dst);
+  return total;
+end CopyFile;
+
+var f: File;
+  line: String;
+begin
+  dir := arg(1);
+  f := Open(dir & "/table.txt", Writing);
+  WriteLine(f, "apples,12");
+  WriteLine(f, "pears,30");
+  Files.Write(f, "plums,");
+  WriteLine(f, str(8));
+  Close(f);
+  write("total ");
+  writeln(Total(dir & "/table.txt"));
+  f := Open(dir & "/table.txt", Appending);
+  WriteLine(f, "figs,100");
+  Flush(f);
+  Close(f);
+  writeln("total ", Total(dir & "/table.txt"));
+  writeln("copied ", CopyFile(dir & "/table.txt", dir & "/copy.txt"), " bytes");
+  f := Open(dir & "/copy.txt");
+  while Files.ReadLine(f, line) do
+    writeln("  ", line);
+  end;
+  Close(f);
+  try
+    Close(f);
+  except
+    when ProgramError var e:
+      writeln(e.name, ": ", e.message);
+  end;
+  Delete(dir & "/table.txt");
+  Delete(dir & "/copy.txt");
+  writeln(Exists(dir & "/table.txt"), " ", Exists(dir & "/copy.txt"));
+  try
+    f := Open(dir & "/table.txt");
+  except
+    when InputOutputError var e:
+      writeln(e.name, ", ", e.message = "not found: " & dir & "/table.txt");
+  end;
+end file_table.

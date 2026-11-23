@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- The unit `Files` of the standard library (step 4, stage 6), in
+  `stdlib/files.luxia`: `Open` (`Access = (Reading, Writing,
+  Appending)`), `Close`, `Flush`, `ReadLine`, `ReadBytes`, `Write`,
+  `WriteLine`, `WriteBytes`, `Exists`, `Delete`; `File = new Int64`, a
+  handle the runtime checks (`ProgramError`, invalid file handle); every
+  error an `InputOutputError` with its reason. The library reaches the
+  runtime with `external "runtime" name "f"` (L0109 outside the library,
+  or when the profile does not fit the function): a call.rt, not C for
+  `no_external`, not a value. The tests of `tests/run` take arguments
+  (`<name>.args`).
+- A unit may declare a name of the language at its own level (§ 9): the
+  name written alone stays the language's everywhere, the unit's is
+  reached only qualified, `Files.Write`; a use spelt as the unit's
+  (`Write` for `write`) is L0022 with a note at the unit's declaration.
+  Programs and routines still get L0023, and `str` everywhere.
 - Built with Meri `c0df97a` and Limba `b8a1603`: an empty string made at
   run time is the handle 0 on every engine, never an object alive, as a
   `BigInt` 0 is; `raise E with m` keeps an empty `m`, which no longer

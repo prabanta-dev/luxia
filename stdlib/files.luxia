@@ -1,0 +1,81 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+//
+// Files: files opened by name, read and written through a buffer of
+// 65 536 bytes of the runtime, the same in every engine. Every error is an
+// InputOutputError that can be taken, with the reason in its message
+// ("not found: name", "not allowed: name", "cannot open: name", "too many
+// open files"); a file never opened, or closed, is a ProgramError
+// ("invalid file handle"). At most 256 files are open at once. The files
+// still open at the end of the program are written and closed, also after
+// an exception no one took or halt.
+//
+// Write, ReadLine, ReadBytes and WriteBytes are also names of the language:
+// written alone they are the language's (write, readline...), and these
+// are written Files.Write, Files.ReadLine... (§ 9, § 11.3).
+unit Files;
+
+interface
+
+type
+  // A file: a handle the runtime checks. A distinct type of Int64 for
+  // now (it becomes a private type with the private types of Luxia):
+  // conversions to File are not promised.
+  File = new Int64;
+  Access = (Reading, Writing, Appending);
+
+// Opens the file name: Reading, Writing (made, or emptied) or Appending
+// (made if missing). A 0 byte in the name is a RangeError.
+function Open(name: String; access: Access := Reading): File;
+  external "runtime" name "file_open";
+
+// Writes what the buffer holds and closes the file.
+procedure Close(f: File);
+  external "runtime" name "file_close";
+
+// Writes what the buffer holds, without closing.
+procedure Flush(f: File);
+  external "runtime" name "file_flush";
+
+// The next line of the file in s, without its line feed and a carriage
+// return before it; false at the end of the file, with s empty (as
+// readline).
+function ReadLine(f: File; out s: String): Boolean;
+  external "runtime" name "file_read_line";
+
+// Up to count bytes into a from from; how many, fewer only at the end of
+// the file (as readbytes).
+function ReadBytes(f: File; var a: array[Int64 range <>] of Byte;
+  from, count: Int64): Int64;
+  external "runtime" name "file_read";
+
+// The bytes of s; WriteLine adds a line feed.
+procedure Write(f: File; s: String);
+  external "runtime" name "file_write";
+procedure WriteLine(f: File; s: String);
+
+// count bytes of a from from (as writebytes).
+procedure WriteBytes(f: File; a: array[Int64 range <>] of Byte;
+  from, count: Int64);
+  external "runtime" name "file_write";
+
+// Is there anything of that name?
+function Exists(name: String): Boolean;
+  external "runtime" name "file_exists";
+
+// Removes the file: "not found: name", "not allowed: name" or "cannot
+// delete: name" if it cannot.
+procedure Delete(name: String);
+  external "runtime" name "file_delete";
+
+implementation
+
+const NewLine: String = "" & LF;
+
+procedure WriteLine(f: File; s: String);
+begin
+  Files.Write(f, s);
+  Files.Write(f, NewLine);
+end WriteLine;
+
+end Files.

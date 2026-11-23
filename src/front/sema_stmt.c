@@ -409,7 +409,10 @@ void lxs_routine_body(limba_lxs *S, limba_sym routine)
     if (!scope || !body)
         return;
     if (lxs_node(S, body)->kind == LXN_EXTERNAL) {
-        lxs_c_routine(S, routine);
+        if (lxs_rt_of(S, body) != -1)
+            lxs_rt_routine(S, routine); /* of the runtime (§ 8.5) */
+        else
+            lxs_c_routine(S, routine);
         return;
     }
     uint32_t locals = lxs_node(S, body)->a, stmts = lxs_node(S, body)->b;

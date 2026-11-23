@@ -281,6 +281,10 @@ static void routine(lxl *L, uint32_t node, limba_sym s, limba_ltype pt,
     /* a routine of C (§ 8.5): call.ext, an array its address alone, a
        record by value the address of its bytes (IR § 11e) */
     bool ext = s && lxl_external(L, s);
+    /* a function of the runtime the library declares (§ 8.5): call.rt */
+    int rtid = ext ? lxs_rt_of(S, S->t->node[S->st.sym[s].node].d) : -1;
+    if (rtid >= 0)
+        ext = false;
     bool agg = sig->elem != S->ts.void_ && !lxl_scalar(L, sig->elem);
     limba_id slot = LIMBA_NONE;
     if (!s) {
@@ -368,11 +372,75 @@ static void routine(lxl *L, uint32_t node, limba_sym s, limba_ltype pt,
                 break;
         }
     }
-    for (uint32_t i = 0; i < count; i++)
-        for (uint32_t j = 0; j < pk[i]; j++) {
+    if (rtid >= 0) {
+        /* to the runtime (sema checked the plan): a span the address of
+           its byte at from and count, checked as readbytes; a String
+           whole its address and length; var and out their address; an
+           enumeration its position; the others their value */
+        lxl_at(L, node);
+        uint8_t *plan = limba_xcalloc(count + 1, 1);
+        uint8_t *bits = limba_xcalloc(count + 1, 1);
+        lxs_rt_plan(S, S->st.sym[s].type, rtid, plan, bits);
+        for (uint32_t i = 0; i < count; i++) {
+            limba_ltype ptt = S->ts.param[first + i].type;
+            bool text = ti(L, ptt)->kind == LIMBA_LTK_STRING;
+            limba_id b = pv[i][0], lo = pv[i][1], hi = pv[i][2];
+            bool sg = true;
+            if (plan[i] == LXS_RT_SPAN || plan[i] == LXS_RT_WHOLE) {
+                if (text) {
+                    limba_id v = pv[i][0];
+                    b = lxl_rt(L, LIMBA_RT_STR_PTR, LIMBA_T_PTR, &v, 1);
+                    lo = lxl_iconst(L, LIMBA_T_I64, 1);
+                    hi = lxl_rt(L, LIMBA_RT_STR_LEN, LIMBA_T_I64, &v, 1);
+                } else {
+                    sg = lxl_signed(L, lxs_base(S, ti(L, ptt)->index));
+                }
+            }
+            if (plan[i] == LXS_RT_WHOLE) {
+                LIMBA_GROW(ops, n, cap);
+                ops[n++] = b;
+                LIMBA_GROW(ops, n, cap);
+                ops[n++] = hi;
+                continue;
+            }
+            if (plan[i] == LXS_RT_SPAN) {
+                limba_id from = pv[i + 1][0], cnt = pv[i + 2][0];
+                span_checks(L, sg, from, cnt, lo, hi);
+                limba_id pa = element_at(L, b, lo, from, 1);
+                lxl_live(L, pa);
+                LIMBA_GROW(ops, n, cap);
+                ops[n++] = pa;
+                LIMBA_GROW(ops, n, cap);
+                ops[n++] = cnt;
+                i += 2;
+                continue;
+            }
+            limba_id v = pv[i][0];
+            if (plan[i] == LXS_RT_ADDR)
+                lxl_live(L, v);
+            if (plan[i] == LXS_RT_ENUM) {
+                limba_id want = bits[i] == 8    ? LIMBA_T_I8
+                                : bits[i] == 16 ? LIMBA_T_I16
+                                : bits[i] == 32 ? LIMBA_T_I32
+                                                : LIMBA_T_I64;
+                limba_id have = lxl_type(L, ptt);
+                if (limba_type_bits(want) > limba_type_bits(have))
+                    v = un(L, LIMBA_OP_ZEXT, want, v);
+                else if (limba_type_bits(want) < limba_type_bits(have))
+                    v = un(L, LIMBA_OP_TRUNC, want, v);
+            }
             LIMBA_GROW(ops, n, cap);
-            ops[n++] = pv[i][j];
+            ops[n++] = v;
         }
+        free(plan);
+        free(bits);
+    } else {
+        for (uint32_t i = 0; i < count; i++)
+            for (uint32_t j = 0; j < pk[i]; j++) {
+                LIMBA_GROW(ops, n, cap);
+                ops[n++] = pv[i][j];
+            }
+    }
     free(pv);
     free(pk);
     lxl_at(L, node);
@@ -381,7 +449,9 @@ static void routine(lxl *L, uint32_t node, limba_sym s, limba_ltype pt,
     limba_id rt =
         sig->elem == S->ts.void_ || agg ? LIMBA_T_VOID : lxl_type(L, sig->elem);
     limba_id r;
-    if (s) {
+    if (rtid >= 0) {
+        r = lxl_rt(L, (unsigned)rtid, rt, ops, n);
+    } else if (s) {
         lxl_nest_call(L, s, node, false);
         r = lxl_emit(L, ext ? LIMBA_OP_CALLEXT : LIMBA_OP_CALL, rt, 0,
                      L->func_of[s], 0, ops, n);

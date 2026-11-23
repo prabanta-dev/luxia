@@ -1,0 +1,10 @@
+total 50
+total 150
+copied 36 bytes
+  apples,12
+  pears,30
+  plums,8
+  figs,100
+ProgramError: invalid file handle
+false false
+InputOutputError, true

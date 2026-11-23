@@ -35,6 +35,9 @@
     64u /* a typed constant of a record or array type:                         \
            read as a variable, filled before any code                          \
            (§ 4.3) */
+#define LXS_LANGNAME                                                           \
+    128u /* a name of a unit equal to a name of the language: reached          \
+            only qualified, Unit.Name (§ 9, § 11.3) */
 
 /* the platforms whose C the C types by name follow (luxia --target) */
 enum { LXS_X86_64_LINUX, LXS_AARCH64_LINUX, LXS_X86_64_WINDOWS };
@@ -386,6 +389,12 @@ bool lxs_restricted(const limba_lxs *S, uint32_t node);
 /* a declaration at the level of a file: the names of units it may not
    take, the names of units it hides (§ 11.3) */
 bool lxs_unit_declare(limba_lxs *S, uint32_t scope, uint32_t name_node);
+/* may scope, the interface or the implementation of a unit, declare a
+   name of the language (§ 9) */
+bool lxs_unit_level(const limba_lxs *S, uint32_t scope);
+/* a name of the language written as a unit seen from scope declares it:
+   a note at that declaration, with its qualified form */
+void lxs_lang_note(limba_lxs *S, uint32_t scope, uint32_t name);
 /* record what is being checked uses: a routine called, a variable of a
    file read or written */
 void lxs_use(limba_lxs *S, limba_sym what, uint32_t node, bool write);
@@ -427,6 +436,25 @@ static inline const limba_typeinfo *lxs_ty(const limba_lxs *S, limba_ltype t)
 bool lxs_pragma_is(limba_lxs *S, uint32_t node, const char *name);
 void lxs_c_pragma(limba_lxs *S, uint32_t node, uint32_t scope);
 void lxs_c_routine(limba_lxs *S, limba_sym s);
+
+/* the boundary of the standard library with the runtime (§ 8.5, D148):
+   the function of the runtime an EXTERNAL node names with external
+   "runtime" name "f", as an index of limba_rts; -1 if the node is a
+   routine of C, -2 if "runtime" names no function. A span is a parameter
+   that is an open array of Bytes, or a String in, followed by two Int64
+   in, from and count: the runtime takes the address of the byte at from,
+   and count (the checks of readbytes); a String in may also go whole, as
+   its address and its length. lxs_rt_routine checks the routine s
+   against the signature of its function */
+int lxs_rt_of(const limba_lxs *S, uint32_t ext);
+void lxs_rt_routine(limba_lxs *S, limba_sym s);
+/* how each parameter of sig goes to the function id of the runtime: its
+   value; its address (var, out); a span (the three parameters); a
+   String in, all its bytes (an address and a length); an enumeration as
+   its position, of bits[k] bits. False if the profile does not fit */
+enum { LXS_RT_VALUE = 1, LXS_RT_ADDR, LXS_RT_SPAN, LXS_RT_WHOLE, LXS_RT_ENUM };
+bool lxs_rt_plan(const limba_lxs *S, limba_ltype sig, int id, uint8_t *plan,
+                 uint8_t *bits);
 
 /* overloading (sema_overload.c, § 8.8) */
 /* the next routine of the name of s, 0 if none */

@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+// A file of the unit Files used after Close: ProgramError, which no
+// handler takes here; the file still open at the end is written and
+// closed after the message. Its first argument is the directory of the
+// file it makes.
+program file_closed;
+
+uses Files;
+
+var f, g: File;
+begin
+  g := Open(arg(1) & "/left_open.txt", Writing);
+  WriteLine(g, "written at the end");
+  f := Open(arg(1) & "/closed.txt", Writing);
+  Close(f);
+  Delete(arg(1) & "/closed.txt");
+  writeln("closed");
+  Files.Write(f, "too late");
+end file_closed.

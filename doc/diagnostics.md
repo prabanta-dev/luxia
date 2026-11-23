@@ -465,7 +465,11 @@ prog.luxia:3:3: error[L0021]: 'total' is not declared
 Names are unique regardless of case, but every use is spelt exactly as
 the declaration (§ 2.2). The name after the `end` of a routine or of the
 program counts as a use: `end show;` closing a routine declared `Show`
-gives "'show' is declared as 'Show': write it the same way".
+gives "'show' is declared as 'Show': write it the same way". A name of
+the language written alone as a unit seen there declares it (`Write`,
+which `Files` declares, for `write`) is the language's, misspelt: a note
+points at the unit's declaration, "'Write' of 'Files' is written
+Files.Write" (§ 9).
 
 ```pascal
 program p;
@@ -484,8 +488,11 @@ prog.luxia:4:3: error[L0022]: 'count' is declared as 'Count': write it the same 
 A name declared twice in the same scope, even with a different case
 (§ 2.2, § 5.4). A note points at the first declaration. The same code is
 given to the declaration of a name of the language, such as `writeln` or
-`Int32` ("'writeln' is a name of the language", § 9), and to a second
-field with the same name in a record ("a second field with this name").
+`Int32` ("'writeln' is a name of the language", § 9), in a program or
+inside a routine (a unit may declare one at its own level, reached then
+only as `Unit.Name`), to `str` declared anywhere ("a str for a type of
+the program is added with overload"), and to a second field with the
+same name in a record ("a second field with this name").
 
 ```pascal
 program p;
@@ -2375,7 +2382,9 @@ prog.luxia:8:10: error[L0108]: this branch is never reached: ConstraintError, a 
 ### L0109 — RAISE OUT OF PLACE
 
 `raise;` outside a branch of `except` (§ 7.9); `external "runtime"`
-outside the units of the standard library (§ 8.5).
+outside the units of the standard library (§ 8.5), and in them one
+without `name`, naming no function of the runtime, or with a profile
+that does not fit its function.
 
 ```pascal
 program p;
@@ -2386,6 +2395,17 @@ end.
 
 ```
 prog.luxia:3:3: error[L0109]: raise without an exception raises the one of a handler again: it goes only inside a branch of except
+```
+
+```pascal
+program p;
+procedure Gone(name: String); external "runtime" name "file_delete";
+begin
+end.
+```
+
+```
+prog.luxia:2:31: error[L0109]: external "runtime" is the boundary of the standard library with the runtime: only its units declare it
 ```
 
 ### L0110 — JUMP OUT OF FINALLY
@@ -2503,7 +2523,7 @@ different lengths is already a type mismatch (L0027).
 | L0020 | END_ALIGN | warning: `end` not under its opening |
 | L0021 | UNKNOWN_NAME | a name declared nowhere |
 | L0022 | SPELLING | a use spelt differently from the declaration |
-| L0023 | DUPLICATE | a name declared twice in a scope, or a name of the language |
+| L0023 | DUPLICATE | a name declared twice in a scope, or a name of the language outside the level of a unit |
 | L0024 | BEFORE_DECL | a constant or variable used before its declaration |
 | L0025 | NOT_A_TYPE | a value where a type is wanted |
 | L0026 | NOT_A_VALUE | a type where a value is wanted |
@@ -2589,7 +2609,7 @@ different lengths is already a type mismatch (L0027).
 | L0106 | PROC_TYPE_FORM | a procedural type without a name, or with a default value |
 | L0107 | EXCEPTION_PLACE | an exception inside a routine, as a type of values, with a parent that is not one |
 | L0108 | HANDLER | a branch never reached, `when StorageError:`, `when var e:` not last |
-| L0109 | RAISE_PLACE | `raise;` outside a branch; `external "runtime"` outside the library |
+| L0109 | RAISE_PLACE | `raise;` outside a branch; `external "runtime"` outside the library, or not fitting the runtime |
 | L0110 | FINALLY_JUMP | `return`, `exit`, `continue` leaving a `finally` |
 | L0111 | NO_HANDLERS | `try` under `restrictions(no_handlers)`, also reached in the library |
 | L0112 | OCCURRENCE | the occurrence used other than by `message`, `position`, `name` |
