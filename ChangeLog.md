@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Built with Meri `c0df97a` and Limba `b8a1603`: an empty string made at
+  run time is the handle 0 on every engine, never an object alive, as a
+  `BigInt` 0 is; `raise E with m` keeps an empty `m`, which no longer
+  turns into the text of a run-time error. The random programs compare
+  the engines on what memory holds at the end (M4): the references to
+  strings and to refs memory keeps and the blocks never freed, from
+  `lir_run --check-mem` and `meri --live`, on every run whose entry
+  returned, an exception taken too. No change of the front end or of the
+  IR it writes.
 - The random programs of the tests raise and take exceptions (step 4,
   stage 5): exceptions of the program and their families, try with
   branches, else, when var e:, finally, raise and raise;, jumps through
@@ -11,8 +20,6 @@
   the jump's lists; a variable kept in a slot was saved by every try
   after its list ended; the routines under a handler were looked up by
   the node of their heading in an interface.
-  Still to come (M4): the engines compared on what memory holds at the
-  end, after an exception taken too, once `meri --live` is there.
 - Arrays whose length is known at run time are assigned whole (step 4,
   stage 4): an open `var` or `out` parameter, an array with computed
   bounds, `p^` of an array made by new, from any array the open parameter
