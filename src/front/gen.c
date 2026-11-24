@@ -2939,7 +2939,20 @@ static uint32_t expr(G *g, unsigned t, int d, bool need_var)
         choice = 0;
     }
     if (f == 'F') {
-        /* + - * /, the minus and abs, a conversion from an integer */
+        /* + - * /, a power, the minus and abs, a conversion from an
+           integer */
+        if (choice < 6 && chance(g, 12)) {
+            /* the exponent of the type, a literal (binary fractions,
+               often whole) or any real, or an integer: no error, a NaN
+               or an infinity printed (§ 6.3) */
+            static const double ex[] = {0.5, 2.0, 1.5, 3.0, 0.0, 0.25, 10.0};
+            uint32_t a = expr(g, t, d - 1, true);
+            uint32_t n = chance(g, 35)   ? lit(g, t, fbits(ex[below(g, 7)]))
+                         : chance(g, 50) ? expr(g, t, d - 1, true)
+                         : chance(g, 50) ? lit(g, T_I32, below(g, 8))
+                                         : expr(g, int_type(g), d - 1, true);
+            return binop(g, O_POW, t, a, n);
+        }
         if (choice < 6) {
             static const unsigned fops[] = {O_ADD, O_SUB, O_MUL, O_FDIV};
             uint32_t a = expr(g, t, d - 1, false);
@@ -6940,6 +6953,16 @@ static v128 binary(X *x, uint32_t i)
             return fres(t, a - b);
         case O_MUL:
             return fres(t, a * b);
+        case O_POW: {
+            /* the pow of Limba's library in double, rounded once to the
+               type: a real exponent of the type, or an integer one
+               converted to double (§ 6.3) */
+            unsigned et = base(x->g, x->g->e[e->b].t);
+            double y = fam(et) == 'F'   ? b
+                       : fam(et) == 'S' ? (double)(int64_t)r
+                                        : (double)(uint64_t)r;
+            return fres(t, limba_math_pow(a, y));
+        }
         default:
             return fres(t, a / b);
         }

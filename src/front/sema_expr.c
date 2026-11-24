@@ -387,6 +387,11 @@ static limba_ltype predefined(limba_lxs *S, unsigned op, limba_ltype lt,
     unsigned k = kind(S, t);
     switch (op) {
     case LX_POWER:
+        /* an integer exponent, or on a real one of the same real type */
+        if (is_float(S, lt) && is_float(S, rt) && rt != S->ts.ureal)
+            return untyped(S, lt) || lxs_compatible(S, lt, rt) ? rt : 0;
+        if (is_float(S, lt) && rt == S->ts.ureal)
+            return t;
         return is_numeric(S, lt) && is_int(S, rt) ? t : 0;
     case LX_KW_SHL:
     case LX_KW_SHR:
@@ -443,7 +448,8 @@ static limba_ltype defined_op(limba_lxs *S, uint32_t node, limba_sym m,
     return set(S, node, ti->elem);
 }
 
-static limba_ltype binary(limba_lxs *S, uint32_t node, uint32_t scope)
+static limba_ltype binary(limba_lxs *S, uint32_t node, uint32_t scope,
+                          limba_ltype expected)
 {
     limba_lx_node *x = lxs_node(S, node);
     unsigned op = x->op;
@@ -510,6 +516,32 @@ static limba_ltype binary(limba_lxs *S, uint32_t node, uint32_t scope)
             return set(S, node, 0);
         if (!is_numeric(S, lt))
             return op_error(S, node, lt, "raises numbers");
+        if (is_float(S, rt) && (is_float(S, lt) || untyped(S, lt))) {
+            /* a real exponent: the type of the base, which a constant
+               without a type takes from the other operand, or between
+               two from the real type expected, as sqrt (§ 6.3, § 9.6) */
+            limba_ltype ft =
+                !untyped(S, lt)   ? lxs_base(S, lt)
+                : !untyped(S, rt) ? lxs_base(S, rt)
+                : expected && is_float(S, expected) && !untyped(S, expected)
+                    ? lxs_base(S, expected)
+                    : 0;
+            if (!ft) {
+                lxs_error(S, LXE_NEED_TYPE, node,
+                          "'**' of two constants with a real exponent "
+                          "needs a type: write 'Float64(x) ** y'");
+                return set(S, node, 0);
+            }
+            if ((untyped(S, lt) && !convert_const(S, l, ft)) ||
+                (untyped(S, rt) && !convert_const(S, r, ft)))
+                return set(S, node, 0);
+            if (lxs_base(S, S->type[r]) != lxs_base(S, S->type[l]))
+                return op_error_at(S, node, r, S->type[r],
+                                   "takes a real exponent of the type of "
+                                   "the base");
+            res = ft;
+            break;
+        }
         if (!is_int(S, rt))
             return op_error_at(S, node, r, rt,
                                "takes an exponent of an integer type of a "
@@ -2470,7 +2502,7 @@ limba_ltype lxs_expr(limba_lxs *S, uint32_t node, uint32_t scope,
     case LXN_UNARY:
         return unary(S, node, scope);
     case LXN_BINARY:
-        return binary(S, node, scope);
+        return binary(S, node, scope, expected);
     case LXN_IN:
         return membership(S, node, scope);
     case LXN_SEL:

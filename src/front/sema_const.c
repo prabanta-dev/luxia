@@ -7,7 +7,9 @@
 #include "sema.h"
 
 #include "common/xalloc.h"
+#include "limba/math.h"
 
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -131,6 +133,77 @@ uint32_t lxs_literal(limba_lxs *S, uint32_t node)
 static bool is_float(const limba_lxs *S, limba_ltype t)
 {
     return t && (lxs_ty(S, t)->kind == LIMBA_LTK_FLOAT || t == S->ts.ureal);
+}
+
+/* the exact value of the finite double d */
+static void rat_of_double(limba_rat *r, double d)
+{
+    int k;
+    double f = frexp(d, &k); /* d = f * 2^k, 0.5 <= |f| < 1 */
+    int64_t m = (int64_t)ldexp(f, 53);
+    int e = k - 53;
+    limba_big b;
+    limba_big_init(&b);
+    limba_big_set_i64(&b, m);
+    if (e >= 0) {
+        limba_big_shl(&b, &b, (uint32_t)e);
+        limba_rat_set_big(r, &b);
+    } else {
+        limba_rat n, p;
+        limba_rat_init(&n);
+        limba_rat_init(&p);
+        limba_rat_set_big(&n, &b);
+        limba_big_set_u64(&b, 1);
+        limba_big_shl(&b, &b, (uint32_t)-e);
+        limba_rat_set_big(&p, &b);
+        limba_rat_div(r, &n, &p);
+        limba_rat_free(&n);
+        limba_rat_free(&p);
+    }
+    limba_big_free(&b);
+}
+
+/* x ** y with a real exponent, between constants of the real type: what
+   the run time gives, bit for bit (§ 6.3): the operands rounded to the
+   type, the pow of § 9.6, the result rounded to the type; a value no
+   constant has (an infinity, a NaN, a negative zero) is an error */
+static uint32_t real_power(limba_lxs *S, uint32_t node, uint32_t a, uint32_t b,
+                           limba_ltype type)
+{
+    bool f32 = lxs_ty(S, type)->bits == 32;
+    double x, y;
+    float xf, yf;
+    bool ok = f32 ? limba_rat_to_f32(&S->v[a].num, &xf) &&
+                        limba_rat_to_f32(&S->v[b].num, &yf)
+                  : limba_rat_to_f64(&S->v[a].num, &x) &&
+                        limba_rat_to_f64(&S->v[b].num, &y);
+    if (!ok)
+        return 0; /* too large for the type: told where it took it */
+    if (f32) {
+        x = xf;
+        y = yf;
+    }
+    double r = limba_math_pow(x, y);
+    if (f32)
+        r = (float)r;
+    if (x == 0 && y < 0) {
+        lxs_error(S, LXE_DIV_ZERO, node, "zero to a negative power");
+        return 0;
+    }
+    if (!isfinite(r) || (r == 0 && signbit(r))) {
+        lxs_error(S, LXE_CONST_RANGE, node,
+                  "this power of constants is %s, which no constant is",
+                  isnan(r)   ? "nan"
+                  : isinf(r) ? "an infinity"
+                             : "-0.0");
+        return 0;
+    }
+    limba_rat q;
+    limba_rat_init(&q);
+    rat_of_double(&q, r);
+    uint32_t out = value_rat(S, &q);
+    limba_rat_free(&q);
+    return out;
 }
 
 /* a - b * floor(a / b) or a - b * trunc(a / b), integers */
@@ -308,6 +381,10 @@ uint32_t lxs_fold_binary(limba_lxs *S, uint32_t node, unsigned op, uint32_t a,
         break;
     case LX_POWER: {
         __int128 e, base;
+        if (is_float(S, S->type[lxs_node(S, node)->b])) {
+            limba_rat_free(&r);
+            return type ? real_power(S, node, a, b, type) : 0;
+        }
         /* 0, 1 and -1 to any power are exact however large it is (0 ** 0
            is 1): the rule of BigInt, true of every integer type */
         if (lxs_value_to_int(S, b, &e) && e >= 0 &&

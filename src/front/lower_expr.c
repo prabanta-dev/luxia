@@ -473,9 +473,13 @@ static limba_id power(lxl *L, uint32_t node, limba_ltype t, limba_id a,
     if (is_float(L, t)) {
         limba_id fa =
             it == LIMBA_T_F64 ? a : un(L, LIMBA_OP_FPEXT, LIMBA_T_F64, a);
+        /* a real exponent has the type of the base (§ 6.3) */
         limba_id fe =
-            un(L, lxl_signed(L, et) ? LIMBA_OP_SITOFP : LIMBA_OP_UITOFP,
-               LIMBA_T_F64, e);
+            is_float(L, et)
+                ? (it == LIMBA_T_F64 ? e
+                                     : un(L, LIMBA_OP_FPEXT, LIMBA_T_F64, e))
+                : un(L, lxl_signed(L, et) ? LIMBA_OP_SITOFP : LIMBA_OP_UITOFP,
+                     LIMBA_T_F64, e);
         uint32_t args[2] = {fa, fe};
         limba_id r = lxl_rt(L, LIMBA_RT_MATH_POW, LIMBA_T_F64, args, 2);
         return it == LIMBA_T_F64 ? r : un(L, LIMBA_OP_FPTRUNC, it, r);

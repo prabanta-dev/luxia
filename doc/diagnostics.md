@@ -618,7 +618,9 @@ prog.luxia:5:8: error[L0027]: this is Int64, the variable wants Int32
 An operator applied to a type that does not take it: unary minus on an
 unsigned number, `/` on integers, `div` on reals, shifts and bitwise
 operators outside the `BitsN` types, an order (`<`, `<=`, `>`, `>=`)
-between records or arrays, and so on (§ 3.2, § 6.2, § 6.3).
+between records or arrays, a real exponent of another type than the
+base ("'**' takes a real exponent of the type of the base"), and so on
+(§ 3.2, § 6.2, § 6.3).
 
 ```pascal
 program p;
@@ -725,8 +727,10 @@ A value known at compile time that does not fit where it goes (§ 4.1,
 § 4.2): a literal or constant outside the range of its type, an integer
 constant not exact in a real type ("this integer is not exact in
 Float32: convert it explicitly"), a real constant too large for its type,
-a negative exponent on an integer, a shift by the width of the value or
-more, a width or number of decimals out of its limits in `write`, a
+a negative exponent on an integer, a power of constants with a real
+exponent that is no constant ("this power of constants is nan, which no
+constant is": an infinity, a NaN, −0.0, § 6.3), a shift by the width of
+the value or more, a width or number of decimals out of its limits in `write`, a
 constant argument of `arg` below 1, the bounds of an array argument
 outside the index of an open-array parameter, an array or record larger
 than the memory can address.
@@ -803,7 +807,9 @@ A constant without a type cannot give a type (§ 4.1, § 5.3): a variable
 declared with a constant initialiser and no type, a `for` whose bounds
 are both constants without a type (§ 7.5), a shift, `not`, `and`, `or`
 or `xor` between constants without a `BitsN` type, `sqrt` and the other
-mathematical functions of a constant where no real type is expected, an
+mathematical functions of a constant where no real type is expected, and
+so `**` with a real exponent between two constants without a type
+(§ 6.3), an
 aggregate where nothing gives it a type (§ 6.8).
 
 ```pascal

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `x ** y` with a real exponent (§ 6.3): `y` of the type of `x`, chosen by
+  the type of the exponent (`x ** 2` integer, `x ** 2.0` real); the IEEE
+  754 `pow` with the same bits everywhere, no run-time error. Between
+  constants the compiler computes what the run time would (§ 4.2), and a
+  result no constant can be (an infinity, a NaN, −0.0) is L0029. `lx_gen`
+  writes powers of reals, with real and integer exponents.
 - `test_luxia` checks the names of the standard library against its
   document: every name an interface of `stdlib/` declares is described
   there, and every name described is declared (the document is a draft

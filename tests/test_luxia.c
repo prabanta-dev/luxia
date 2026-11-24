@@ -814,6 +814,25 @@ static const sema_case sema_cases[] =
          "L0027@1:60"},
         {"program p; var b: BigInt := 1.5; begin end.", "L0027@1:29"},
         {"program p; const C: BigInt = 2 ** 20000; begin end.", "L0031@1:32"},
+        /* ** with a real exponent (§ 6.3): the type of the base, an
+           integer base takes none, two constants without a type need
+           one, constants that give no constant */
+        {"program p; var x: Float64 := 2.0; begin writeln(x ** Float32(2.0)); end.",
+         "L0028@1:54"},
+        {"program p; var i: Int64 := 2; begin writeln(i ** 0.5); end.",
+         "L0028@1:50"},
+        {"program p; const C = 2.0 ** 0.5; begin end.", "L0033@1:26"},
+        {"program p; begin writeln(2.0 ** 0.5); end.", "L0033@1:30"},
+        {"program p; var r: Float64 := 2.0 ** 0.5; begin end.", ""},
+        {"program p; const C: Float64 = Float64(0.0) ** (-1.0); begin end.",
+         "L0032@1:44"},
+        {"program p; const C: Float64 = Float64(-8.0) ** (1.0 / 3.0); begin "
+         "end.",
+         "L0029@1:45"},
+        {"program p; const C: Float32 = Float32(10.0) ** 40.0; begin end.",
+         "L0029@1:45"},
+        {"program p; const C: Float64 = Float64(-1e-200) ** 3.0; begin end.",
+         "L0029@1:48"},
         {"program p; var b: BigInt := 2; begin case b of when 1: writeln(1); else writeln(2); end; end.",
          "L0027@1:43"},
         {"program p; var b: BigInt := 2; begin b := succ(b); end.",
@@ -1482,6 +1501,25 @@ static const run_case
             {"program p; var b: Int64 := 3; begin writeln(b ** 4, \" \", 2.0 ** 10); "
              "end.",
              "81 1024.0\n", "ok"},
+            /* ** with a real exponent: a constant gives the bits of the
+               run time (§ 6.3), an integer exponent between constants is
+               exact (§ 4.2); Float32 through Float64, rounded once */
+            {"program p; const C: Float64 = Float64(1.1) ** 2.0; D: Float32 = "
+             "Float32(1.1) ** Float32(2.5); R: Float64 = 2.0 ** 0.5;\nvar x: "
+             "Float64 := 1.1; y: Float32 := 1.1; e: Float64 := 2.0; f: Float32 "
+             ":= 2.5;\nbegin writeln(C, \" \", x ** 2.0, \" \", x ** e, \" \", "
+             "C = x ** e); writeln(D, \" \", y ** 2.5, \" \", D = y ** f); "
+             "writeln(Float64(1.1) ** 2, \" \", x ** 2, \" \", R); end p.",
+             "1.2100000000000002 1.2100000000000002 1.2100000000000002 true\n"
+             "1.2690588 1.2690588 true\n1.21 1.2100000000000002 "
+             "1.4142135623730951\n",
+             "ok"},
+            /* no error at run time: nan, inf; a constant without a type
+               takes the type of the other operand */
+            {"program p; var m: Float64 := -8.0; z: Float64 := 0.0; h: Float64 "
+             ":= 0.5;\nbegin writeln(m ** (1.0 / 3.0), \" \", z ** (-1.0), \" \", "
+             "z ** 0.0, \" \", m ** 3.0, \" \", 4.0 ** h, \" \", 2 ** h); end p.",
+             "nan inf 1.0 -512.0 2.0 1.4142135623730951\n", "ok"},
             {"program p; begin writeln(\"a\"); halt(3); writeln(\"b\"); end.",
              "a\n", "halt 3"},
             /* a range is checked at the assignment, the argument, the return,

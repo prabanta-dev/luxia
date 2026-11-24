@@ -701,10 +701,12 @@ A constant expression of type `BigInt` is computed by the compiler like
 any other. A compiler may bound the size of the constants it computes
 (`luxia`: 16 384 bits); a larger one is a compile-time error.
 
-The static operations are `+ - * /`, `**` with an integer exponent,
-comparisons, `abs`, conversions, and `low(T)`/`high(T)` of a discrete
-type (§ 9.5). `sqrt` and the other library functions are not static, as
-in Ada.
+The static operations are `+ - * /`, `**`, comparisons, `abs`,
+conversions, and `low(T)`/`high(T)` of a discrete type (§ 9.5). `**` with
+an integer exponent is exact like the others; `**` with a real exponent
+is the one static operation that is not: it gives the bits the program
+would compute at run time (§ 6.3). `sqrt` and the other library
+functions are not static, as in Ada.
 
 ### 4.3 Declared constants
 
@@ -978,6 +980,24 @@ end Same;
   The result is the IEEE 754 `pow` computed in `Float64` and rounded once
   to the type of `x`; a negative exponent gives the reciprocal
   (`0.0 ** -1` is `inf`). There is no run-time error.
+- `x ** y` with `x` and `y` reals: `y` has the **type of `x`**, as the
+  two operands of every operator (§ 6.2). The type of the exponent
+  chooses: `x ** 2` has an integer exponent, `x ** 2.0` a real one. A
+  constant without a type takes the type of the other operand; between
+  two constants without a type, from the real type expected where the
+  expression goes, as `sqrt` (§ 9.6), and otherwise one needs a
+  conversion: `Float64(2.0) ** 0.5`. The result is the IEEE 754 `pow` of
+  `x` and `y`, computed as § 9.6 says for the functions of the type of
+  `x`, with the same bits everywhere (§ 9.6). There is no run-time
+  error: with `x` equal to `-8.0`, `x ** (1.0 / 3.0)` is `nan`; with `x`
+  equal to `0.0`, `x ** (-1.0)` is `inf`.
+- Between constants, `x ** y` with a real exponent is computed by the
+  compiler as the program would compute it: `x` and `y` rounded to their
+  type, then the `pow` above, so a constant and the same expression at
+  run time give the same bits (§ 4.2). A result that no constant can be
+  (constants are exact rationals, § 4.2: no infinity, no NaN, and a zero
+  without a sign) is a compile-time error
+  (`Float64(0.0) ** (-1.0)` is "zero to a negative power").
 - On **`BigInt`** (§ 3.12) nothing overflows; `div`, `mod` and `rem`
   follow the rules above, and a division by zero is a run-time error.
   `x ** n` takes `n` of any integer type of fixed size (not `BigInt`),
