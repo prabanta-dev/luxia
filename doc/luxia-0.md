@@ -1712,7 +1712,8 @@ unit, in a routine.
   (§ 11.2), while `write` alone stays the language's. A `uses` never
   brings it in unqualified, two units declaring it are no ambiguity
   (§ 11.3), and a new name of the language never stops a unit from
-  compiling nor changes what it means. Written alone with the spelling
+  compiling, unless the unit has that name (§ 11.3), nor changes what
+  it means. Written alone with the spelling
   of the unit (`Write` for `write`), the name is the language's spelt
   otherwise, an error (§ 2.2), with a note at the unit's declaration.
 - `str` is never declared again: a program or a unit adds meanings to it
@@ -2369,7 +2370,8 @@ end.
   enumeration); only record fields, always reached after a dot, may
   have it. Otherwise `Text.X` in that file could mean something other
   than the unit. For the same reason a unit cannot declare its own
-  name. A unit cannot have the name of a name of the language (§ 9).
+  name. A unit cannot have the name of a name of the language (§ 9),
+  whoever writes it, in the library or not, as in Ada.
 - **A name of the language declared by a unit** (§ 9) is never a name of
   the unit written directly: `Write` alone is the language's `write`
   (spelt otherwise, an error) in every file, and the unit's routine is

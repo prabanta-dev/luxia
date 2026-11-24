@@ -1572,6 +1572,10 @@ end.
 prog.luxia:3:5: error[L0072]: 'Shapes' is the name of a unit used here: it cannot be declared in this file
 ```
 
+A unit named as a name of the language, in the program's space or in the
+library's, gives "'Length' is a name of the language: a unit cannot take
+it" at its name.
+
 ### L0073 — NOT IN THE INTERFACE
 
 `Unit.Name` names what the interface of the unit declares (§ 11.3).

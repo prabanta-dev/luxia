@@ -14,6 +14,7 @@
 #include "meri/meri.h"
 
 #include <errno.h>
+#include <limits.h>
 #include <malloc.h>
 #include <signal.h>
 #include <stdbool.h>
@@ -21,6 +22,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 static void usage(FILE *out)
 {
@@ -46,7 +49,8 @@ static void usage(FILE *out)
           "             for more, in order)\n"
           "  --stdlib=DIR\n"
           "             the directory of the units of the standard\n"
-          "             library\n"
+          "             library; by default ../../stdlib from the\n"
+          "             directory of luxia, if there; --stdlib= for none\n"
           "  --restrict=no_external\n"
           "             no boundary with C: an external routine is an error\n"
           "  --restrict=no_handlers\n"
@@ -82,6 +86,28 @@ static void usage(FILE *out)
           "             error\n"
           "  --skip=a,b passes not to run (also LIMBA_OPTSKIP)\n",
           out);
+}
+
+/* the standard library when no --stdlib is given: ../../stdlib from the
+   directory of the executable, found through /proc/self/exe (not argv[0],
+   relative to the current directory or to a name of the PATH); NULL if it
+   is not a directory. buf holds PATH_MAX bytes */
+static const char *default_stdlib(char *buf)
+{
+    char exe[PATH_MAX];
+    ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+    if (n <= 0 || (size_t)n >= sizeof(exe) - 1)
+        return NULL;
+    exe[n] = 0;
+    char *slash = strrchr(exe, '/');
+    static const char up[] = "/../../stdlib";
+    if (!slash || (size_t)(slash - exe) + sizeof(up) > sizeof(exe))
+        return NULL;
+    memcpy(slash, up, sizeof(up));
+    struct stat st;
+    if (!realpath(exe, buf) || stat(buf, &st) != 0 || !S_ISDIR(st.st_mode))
+        return NULL;
+    return buf;
 }
 
 /* a size with an optional K, M or G (powers of 1024); false if it is not
@@ -145,6 +171,8 @@ static int run(int argc, char **argv, const char **unit_dirs)
     const char *input = NULL, *suppress = NULL, *restrict_ = NULL;
     bool no_handlers = false;
     const char *stdlib = NULL, *emit = NULL, *outpath = NULL, *target = NULL;
+    bool stdlib_given = false;
+    char stdlib_dir[PATH_MAX];
     size_t nunit_dirs = 0;
     const char *libdirs[64];
     size_t nlibdirs = 0;
@@ -201,6 +229,7 @@ static int run(int argc, char **argv, const char **unit_dirs)
             unit_dirs[nunit_dirs++] = a + 2;
         } else if (!strncmp(a, "--stdlib=", 9)) {
             stdlib = a + 9;
+            stdlib_given = true;
         } else if (!strncmp(a, "--emit=", 7)) {
             emit = a + 7;
             if (strcmp(emit, "lir") && strcmp(emit, "lit") &&
@@ -238,6 +267,12 @@ static int run(int argc, char **argv, const char **unit_dirs)
         usage(stderr);
         return 2;
     }
+    /* the library: the one given, none with --stdlib=, or the default
+       (D152) */
+    if (!stdlib_given)
+        stdlib = default_stdlib(stdlib_dir);
+    else if (!*stdlib)
+        stdlib = NULL;
 
     if (emit || outpath || target || opt.stats) {
         if (!emit) {

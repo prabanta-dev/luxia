@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+// luxia --stdlib= takes the standard library away: a unit of it is not
+// found.
+program stdlib_none;
+
+uses Files;
+
+begin
+  writeln(Exists("x"));
+end stdlib_none.

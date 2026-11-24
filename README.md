@@ -104,7 +104,8 @@ Some of its rules:
     luxia --check program.luxia        # reports its errors, runs nothing
     luxia --lib-path=DIR program.luxia # where its C libraries are looked for
     luxia -I DIR program.luxia         # where its units are looked for
-    luxia --stdlib=DIR program.luxia   # the units of the standard library
+    luxia --stdlib=DIR program.luxia   # the standard library elsewhere (by default
+                                       # ../../stdlib from luxia; --stdlib= for none)
     luxia --help                       # every option
 
 The options come before the source; what follows it goes to the program.

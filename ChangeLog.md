@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- `luxia` finds the standard library by itself: without `--stdlib`, the
+  directory `../../stdlib` from its own executable (through
+  `/proc/self/exe`), if there; `--stdlib=` with nothing takes the library
+  away.
+- A unit cannot take a name of the language, whoever writes it, in the
+  library or not (§ 9, § 11.3; L0072): the specification says so in
+  both places.
 - The unit `Files` of the standard library (step 4, stage 6), in
   `stdlib/files.luxia`: `Open` (`Access = (Reading, Writing,
   Appending)`), `Close`, `Flush`, `ReadLine`, `ReadBytes`, `Write`,
