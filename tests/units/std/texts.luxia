@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Maurizio Cammalleri
 //
-// A unit of the standard library, for the tests: found with
+// A unit of a library for the tests, not the standard one: found with
 // --stdlib=tests/units/std, in a space of its own.
-unit Strings;
+unit Texts;
 
 interface
 
@@ -20,4 +20,4 @@ begin
   return r;
 end Times;
 
-end Strings.
+end Texts.

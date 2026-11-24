@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- `test_luxia` checks the rules of the standard library on `stdlib/`:
+  exported names in PascalCase, a name in two units only from a list and
+  with `overload` in all, a name of the language only from a second list
+  (`Files.Write`, `Files.ReadLine`, `Files.ReadBytes`, `Files.WriteBytes`),
+  both lists checked both ways, only qualified names between the units,
+  a program using every unit compiles under `no_external`, no warning.
+  Each defective library of `tests/units/stdbad/` breaks one rule and
+  must give its expected message. Two cases give L0072 to a unit named
+  as a name of the language, of the program and of the library. The
+  library of the tests in `tests/units/std/` is now `Texts`, not
+  `Strings`.
 - `x ** y` with a real exponent (§ 6.3): `y` of the type of `x`, chosen by
   the type of the exponent (`x ** 2` integer, `x ** 2.0` real); the IEEE
   754 `pow` with the same bits everywhere, no run-time error. Between

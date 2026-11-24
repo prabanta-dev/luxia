@@ -2,13 +2,13 @@
 // Copyright (C) 2026 Maurizio Cammalleri
 //
 // A program with units (specification § 11): Geometry and Text are units
-// of the program, Strings one of the standard library (luxia
+// of the program, Texts one of a library (luxia
 // --stdlib=tests/units/std). Names direct or qualified, a variable
 // of an interface read outside its unit, initialisations before the
 // program, in the order of what they use.
 program Orbits;
 
-uses Geometry, Strings;
+uses Geometry, Texts;
 
 var a, b: Vector;
   c: Geometry.Vector;
@@ -21,5 +21,5 @@ begin
   b.z := 12.0;
   c := b;
   writeln(Distance(a, b), " ", Geometry.Distance(c, a));
-  writeln(Strings.Times("=", Geometry.calls * 4));
+  writeln(Texts.Times("=", Geometry.calls * 4));
 end Orbits.

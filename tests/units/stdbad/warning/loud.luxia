@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+//
+// A defective library for test_luxia: a unit that gives a warning, an end
+// not under its opening (rule 8).
+unit Loud;
+
+interface
+
+procedure Shout();
+
+implementation
+
+procedure Shout();
+begin
+  end Shout;
+
+end Loud.

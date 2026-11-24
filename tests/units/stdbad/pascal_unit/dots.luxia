@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+//
+// A defective library for test_luxia: a unit whose name is not in
+// PascalCase (rule 5).
+unit dots;
+
+interface
+
+const Count: Int64 = 3;
+
+implementation
+
+end dots.

@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+//
+// A defective library for test_luxia: Pen.Write in the list of the names of
+// the language, and Pen without it (D159, the list checked both ways).
+unit Pen;
+
+interface
+
+procedure Draw(s: String);
+
+implementation
+
+procedure Draw(s: String);
+begin
+end Draw;
+
+end Pen.

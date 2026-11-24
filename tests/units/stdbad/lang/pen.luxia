@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+//
+// A defective library for test_luxia: a name of the language declared by a
+// unit and not in the list of those (D159).
+unit Pen;
+
+interface
+
+procedure Write(s: String);
+
+implementation
+
+procedure Write(s: String);
+begin
+end Write;
+
+end Pen.

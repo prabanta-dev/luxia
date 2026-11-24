@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+//
+// A defective library for test_luxia: Show in two units, not in the list
+// of the names given by more than one (rule 1).
+unit Alpha;
+
+interface
+
+procedure Show(x: Int64);
+
+implementation
+
+procedure Show(x: Int64);
+begin
+end Show;
+
+end Alpha.

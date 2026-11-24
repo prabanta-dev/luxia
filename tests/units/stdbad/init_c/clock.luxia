@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+//
+// A defective library for test_luxia: an initialisation that calls C
+// (rule 3: a program using it does not compile under no_external).
+unit Clock;
+
+interface
+
+var Started: Int64;
+
+implementation
+
+function Seconds(t: CPointer): Int64;
+  external "c" name "time";
+
+begin
+  Started := Seconds(nil);
+end Clock.

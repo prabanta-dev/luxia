@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+//
+// A defective library for test_luxia: a name not in PascalCase (rule 5).
+unit Shapes;
+
+interface
+
+type Shape = (Oval, square);
+
+procedure Draw(s: Shape);
+
+implementation
+
+procedure Draw(s: Shape);
+begin
+end Draw;
+
+end Shapes.

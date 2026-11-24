@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+//
+// A defective library for test_luxia: a unit of the library that names one
+// of another unqualified (rule 2).
+unit Alpha;
+
+interface
+
+function Twice(x: Int64): Int64;
+
+implementation
+
+function Twice(x: Int64): Int64;
+begin
+  return 2 * x;
+end Twice;
+
+end Alpha.

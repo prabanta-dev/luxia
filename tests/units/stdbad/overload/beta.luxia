@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+//
+// The second unit of the defective library overload (rule 1).
+unit Beta;
+
+interface
+
+procedure Show(x: Boolean);
+
+implementation
+
+procedure Show(x: Boolean);
+begin
+end Show;
+
+end Beta.

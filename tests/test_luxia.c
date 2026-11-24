@@ -17,9 +17,11 @@
 #include "opt/pass.h"
 #include "front/lower.h"
 #include "front/sema.h"
+#include "common/xalloc.h"
 
 #include <dirent.h>
 #include <errno.h>
+#include <stdarg.h>
 #include <spawn.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -3391,6 +3393,18 @@ typedef struct {
 } unit_case;
 
 static const unit_case unit_cases[] = {
+    /* a unit cannot take a name of the language, in the space of the
+       program or in that of the library (§ 11.3, D163) */
+    {{{"p.luxia", "program P; uses Length; begin end."},
+      {"length.luxia", "unit Length; interface implementation end Length."}},
+     "",
+     "errors",
+     "L0072@length.luxia:1:6 w:L0077@p.luxia:1:17"},
+    {{{"p.luxia", "program P; uses Sqrt; begin end."},
+      {"std/sqrt.luxia", "unit Sqrt; interface implementation end Sqrt."}},
+     "",
+     "errors",
+     "L0072@std/sqrt.luxia:1:6 w:L0077@p.luxia:1:17"},
     /* the unit of Delphi: an interface, an implementation, an
        initialisation; names direct or qualified, in types too; the units
        a unit uses initialised before it */
@@ -4414,7 +4428,7 @@ static bool interface_names(const char *path, const char *text, name_set *s)
     limba_lx_ast_init(&t);
     limba_lx_parse(&t, &lx, &src, &rep);
     const limba_lx_node *u = &t.node[t.root];
-    if (rep.count == 0 && t.root && u->kind == LXN_UNIT) {
+    if (rep.errors == 0 && t.root && u->kind == LXN_UNIT) {
         size_t len;
         const char *w = written_name(&src, &t, u->a, &len);
         char unit[256];
@@ -4604,6 +4618,468 @@ static int test_library_names(unsigned *count)
     return failures;
 }
 
+/* ---- the rules of the standard library (the proposal, § 5) ---- */
+
+/* the names more than one unit of stdlib/ may give, for the same
+   operation on other types, each with overload in all of them (rule 1);
+   Upper and Lower come with Chars and Strings */
+static const char *const library_twice[] = {NULL};
+/* the names of the language a unit of stdlib/ declares, reached only
+   qualified (D159) */
+static const char *const library_language[] = {
+    "Files.Write", "Files.ReadLine", "Files.ReadBytes", "Files.WriteBytes",
+    NULL};
+
+/* a name an interface declares */
+typedef struct {
+    char unit[64], name[128], fold[128];
+    bool overload; /* a routine with overload */
+    bool lang;     /* a name of the language */
+    bool free;     /* an operator or str: no rule of case */
+} lib_decl;
+
+/* a use of a name in a unit not qualified, of no name the file declares */
+typedef struct {
+    char unit[64], name[128], fold[128];
+} lib_use;
+
+typedef struct {
+    lib_decl *d;
+    size_t nd, capd;
+    lib_use *u;
+    size_t nu, capu;
+    char units[16][64];
+    size_t nunits;
+    FILE *out; /* the messages, one a line */
+    int count;
+} lib_check;
+
+static void lib_say(lib_check *k, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(k->out, fmt, ap);
+    va_end(ap);
+    fputc('\n', k->out);
+    k->count++;
+}
+
+/* the units of one file into k: what its interface declares, and the
+   names it uses unqualified that it never declares (a name of the
+   language is never one of a unit, D159) */
+static bool lib_read(lib_check *k, const char *path)
+{
+    limba_source src;
+    limba_source_init(&src);
+    if (limba_source_load(&src, path) == UINT32_MAX) {
+        limba_source_free(&src);
+        return false;
+    }
+    limba_report rep;
+    limba_report_init(&rep, &src, 'L', 0);
+    limba_lx lx;
+    limba_lx_init(&lx);
+    limba_lx_run(&lx, &src, 0, &rep);
+    limba_lx_ast t;
+    limba_lx_ast_init(&t);
+    limba_lx_parse(&t, &lx, &src, &rep);
+    const limba_lx_node *u = &t.node[t.root];
+    bool ok = rep.errors == 0 && t.root && u->kind == LXN_UNIT &&
+              k->nunits < COUNT(k->units);
+    if (ok) {
+        limba_lxs S;
+        limba_lxs_init(&S, &t, &lx, &src, &rep);
+        size_t len;
+        const char *w = written_name(&src, &t, u->a, &len);
+        char *unit = k->units[k->nunits++];
+        snprintf(unit, sizeof(k->units[0]), "%.*s", (int)len, w);
+        /* the names declared anywhere in the file */
+        bool *mine = calloc(limba_strtab_count(lx.names) + 1, 1);
+        for (uint32_t n = 1; n < t.nnode; n++)
+            if (t.node[n].kind == LXN_NAME &&
+                !(t.node[n].flags & LXN_F_OPNAME))
+                mine[t.node[n].a] = true;
+        for (uint32_t i = 0; i < t.node[u->b].b; i++) {
+            const limba_lx_node *d = &t.node[limba_lx_list_at(&t, u->b, i)];
+            uint32_t one[1], *names = one, nn = 0;
+            switch (d->kind) {
+            case LXN_CONST:
+            case LXN_ROUTINE:
+            case LXN_TYPEDECL:
+                one[0] = d->a;
+                nn = 1;
+                break;
+            case LXN_VAR:
+                names = &t.pool[t.node[d->a].a];
+                nn = t.node[d->a].b;
+                break;
+            default:
+                break;
+            }
+            uint32_t lits = d->kind == LXN_TYPEDECL && d->b &&
+                                    t.node[d->b].kind == LXN_TENUM
+                                ? t.node[d->b].a
+                                : 0;
+            for (uint32_t j = 0; j < nn + (lits ? t.node[lits].b : 0); j++) {
+                uint32_t n = j < nn ? names[j]
+                                    : limba_lx_list_at(&t, lits, j - nn);
+                LIMBA_GROW(k->d, k->nd, k->capd);
+                lib_decl *x = &k->d[k->nd++];
+                memset(x, 0, sizeof(*x));
+                snprintf(x->unit, sizeof(x->unit), "%s", unit);
+                w = written_name(&src, &t, n, &len);
+                snprintf(x->name, sizeof(x->name), "%.*s", (int)len, w);
+                const char *f = limba_strtab_get(lx.names, t.node[n].a, &len);
+                snprintf(x->fold, sizeof(x->fold), "%.*s", (int)len, f);
+                x->overload = d->kind == LXN_ROUTINE && j < nn &&
+                              (d->flags & LXN_F_OVERLOAD);
+                x->free = (t.node[n].flags & LXN_F_OPNAME) ||
+                          strcmp(x->fold, "str") == 0;
+                x->lang = !(t.node[n].flags & LXN_F_OPNAME) &&
+                          limba_sym_local(&S.st, S.universe, t.node[n].a);
+            }
+        }
+        /* the uses: names, and the names of types, not after a unit */
+        for (uint32_t n = 1; n < t.nnode; n++) {
+            const limba_lx_node *x = &t.node[n];
+            bool use = x->kind == LXN_REF ||
+                       (x->kind == LXN_TNAME && !x->d) ||
+                       (x->kind == LXN_TBOX && !x->b);
+            if (!use || mine[x->a] ||
+                limba_sym_local(&S.st, S.universe, x->a))
+                continue;
+            LIMBA_GROW(k->u, k->nu, k->capu);
+            lib_use *y = &k->u[k->nu++];
+            snprintf(y->unit, sizeof(y->unit), "%s", unit);
+            w = lxs_text_at(&S, x->loc);
+            len = lxs_ident_len(w);
+            snprintf(y->name, sizeof(y->name), "%.*s", (int)len, w);
+            const char *f = limba_strtab_get(lx.names, x->a, &len);
+            snprintf(y->fold, sizeof(y->fold), "%.*s", (int)len, f);
+        }
+        free(mine);
+        limba_lxs_free(&S);
+    }
+    limba_lx_ast_free(&t);
+    limba_lx_free(&lx);
+    limba_report_free(&rep);
+    limba_source_free(&src);
+    return ok;
+}
+
+static bool in_list(const char *const *list, size_t n, const char *x)
+{
+    for (size_t i = 0; i < n; i++)
+        if (strcmp(list[i], x) == 0)
+            return true;
+    return false;
+}
+
+/* the diagnoses of a compilation, into a check */
+typedef struct {
+    lib_check *k;
+    int rule; /* 3: the errors, 8: the warnings */
+    const char *what;
+} lib_diags;
+
+static void lib_diag(void *ctx, const limba_luxia_diag *d)
+{
+    lib_diags *x = ctx;
+    if (x->rule == 3 && d->severity == LIMBA_LUXIA_ERROR)
+        lib_say(x->k, "rule 3: %s", d->code[0] ? d->code : d->message);
+    if (x->rule == 8 && d->severity == LIMBA_LUXIA_WARNING)
+        lib_say(x->k, "rule 8: %s in %s", d->code[0] ? d->code : d->message,
+                x->what);
+}
+
+/* the rules of the library of the directory dir, with the two lists
+   (twice, lang: ntwice and nlang names), on out: rule 5 (PascalCase),
+   rule 1 (a name in two units only from the list, with overload in
+   all), the names of the language only from the second list (D159),
+   both lists checked both ways, rule 2 (between units only qualified),
+   rule 3 (a program that uses every unit compiles under no_external),
+   rule 8 (no warning compiling each unit); the units in the order of
+   their files; how many messages */
+static int library_rules(const char *dir, const char *const *twice,
+                         size_t ntwice, const char *const *lang, size_t nlang,
+                         FILE *out)
+{
+    lib_check k = {0};
+    k.out = out;
+    char *files[16];
+    size_t nf = 0;
+    DIR *dd = opendir(dir);
+    struct dirent *e;
+    while (dd && (e = readdir(dd))) {
+        size_t n = strlen(e->d_name);
+        if (n > 6 && strcmp(e->d_name + n - 6, ".luxia") == 0 && nf < 16)
+            files[nf++] = strdup(e->d_name);
+    }
+    if (dd)
+        closedir(dd);
+    for (size_t i = 1; i < nf; i++) /* in order: the messages too */
+        for (size_t j = i; j > 0 && strcmp(files[j - 1], files[j]) > 0; j--) {
+            char *s = files[j];
+            files[j] = files[j - 1];
+            files[j - 1] = s;
+        }
+    for (size_t i = 0; i < nf; i++) {
+        char path[512];
+        snprintf(path, sizeof(path), "%s/%s", dir, files[i]);
+        if (!lib_read(&k, path))
+            lib_say(&k, "%s is not a unit that parses", path);
+    }
+    /* rule 5 */
+    for (size_t u = 0; u < k.nunits; u++)
+        if (!(k.units[u][0] >= 'A' && k.units[u][0] <= 'Z'))
+            lib_say(&k, "rule 5: the unit %s is not in PascalCase",
+                    k.units[u]);
+    for (size_t i = 0; i < k.nd; i++)
+        if (!k.d[i].free && !(k.d[i].name[0] >= 'A' && k.d[i].name[0] <= 'Z'))
+            lib_say(&k, "rule 5: %s.%s is not in PascalCase", k.d[i].unit,
+                    k.d[i].name);
+    /* rule 1: each name once, the first declaration of it */
+    for (size_t i = 0; i < k.nd; i++) {
+        bool first = true;
+        for (size_t j = 0; j < i && first; j++)
+            first = strcmp(k.d[j].fold, k.d[i].fold) != 0;
+        if (!first)
+            continue;
+        char where[512] = "";
+        size_t units = 0;
+        const char *last = "";
+        for (size_t j = i; j < k.nd; j++) {
+            if (strcmp(k.d[j].fold, k.d[i].fold) || !strcmp(k.d[j].unit, last))
+                continue;
+            last = k.d[j].unit;
+            units++;
+            size_t n = strlen(where);
+            snprintf(where + n, sizeof(where) - n, "%sin %s",
+                     units > 1 ? " and " : "", k.d[j].unit);
+        }
+        bool listed = in_list(twice, ntwice, k.d[i].name);
+        if (units > 1 && !listed)
+            lib_say(&k, "rule 1: %s is %s, and not in the list", k.d[i].name,
+                    where);
+        for (size_t j = i; listed && j < k.nd; j++)
+            if (!strcmp(k.d[j].fold, k.d[i].fold) && !k.d[j].overload)
+                lib_say(&k, "rule 1: %s is in the list, without overload in %s",
+                        k.d[i].name, k.d[j].unit);
+    }
+    for (size_t l = 0; l < ntwice; l++) {
+        size_t units = 0;
+        const char *last = "";
+        for (size_t j = 0; j < k.nd; j++)
+            if (!strcmp(k.d[j].name, twice[l]) && strcmp(k.d[j].unit, last)) {
+                last = k.d[j].unit;
+                units++;
+            }
+        if (units < 2)
+            lib_say(&k, "rule 1: %s is in the list, and in fewer than two units",
+                    twice[l]);
+    }
+    /* D159: the names of the language */
+    for (size_t i = 0; i < k.nd; i++) {
+        char q[256];
+        snprintf(q, sizeof(q), "%s.%s", k.d[i].unit, k.d[i].name);
+        bool again = false;
+        for (size_t j = 0; j < i && !again; j++)
+            again = !strcmp(k.d[j].unit, k.d[i].unit) &&
+                    !strcmp(k.d[j].name, k.d[i].name);
+        if (k.d[i].lang && !again && !in_list(lang, nlang, q))
+            lib_say(&k, "D159: %s is a name of the language, not in the list",
+                    q);
+    }
+    for (size_t l = 0; l < nlang; l++) {
+        bool found = false;
+        for (size_t j = 0; j < k.nd && !found; j++) {
+            char q[256];
+            snprintf(q, sizeof(q), "%s.%s", k.d[j].unit, k.d[j].name);
+            found = k.d[j].lang && !strcmp(q, lang[l]);
+        }
+        if (!found)
+            lib_say(&k,
+                    "D159: %s is in the list, and no unit declares it as a "
+                    "name of the language",
+                    lang[l]);
+    }
+    /* rule 2: a name of another unit, unqualified */
+    for (size_t i = 0; i < k.nu; i++)
+        for (size_t j = 0; j < k.nd; j++)
+            if (strcmp(k.d[j].unit, k.u[i].unit) &&
+                !strcmp(k.d[j].fold, k.u[i].fold)) {
+                lib_say(&k, "rule 2: %s names %s of %s unqualified",
+                        k.u[i].unit, k.u[i].name, k.d[j].unit);
+                break;
+            }
+    /* rule 3: every unit used by one program, under no_external */
+    if (k.nunits) {
+        char prog[2048];
+        size_t n = (size_t)snprintf(prog, sizeof(prog), "program Whole;\nuses ");
+        for (size_t u = 0; u < k.nunits; u++)
+            n += (size_t)snprintf(prog + n, sizeof(prog) - n, "%s%s",
+                                  u ? ", " : "", k.units[u]);
+        snprintf(prog + n, sizeof(prog) - n, ";\nbegin\nend Whole.\n");
+        limba_luxia_options o = {0};
+        o.stdlib_path = dir;
+        o.no_external = true;
+        lib_diags x = {&k, 3, "the program"};
+        limba_luxia_consumer c = {0};
+        c.ctx = &x;
+        c.diag = lib_diag;
+        limba_luxia_compile_text("whole.luxia", prog, strlen(prog), &o, &c,
+                                 NULL);
+    }
+    /* rule 8: each unit alone */
+    for (size_t i = 0; i < nf; i++) {
+        char path[512];
+        snprintf(path, sizeof(path), "%s/%s", dir, files[i]);
+        limba_luxia_options o = {0};
+        o.stdlib_path = dir;
+        lib_diags x = {&k, 8, files[i]};
+        limba_luxia_consumer c = {0};
+        c.ctx = &x;
+        c.diag = lib_diag;
+        limba_luxia_compile_file(path, &o, &c, NULL);
+        free(files[i]);
+    }
+    free(k.d);
+    free(k.u);
+    return k.count;
+}
+
+/* the lists of a defective library, from its file lists: "dup Name" and
+   "lang Unit.Name" lines */
+static void bad_lists(const char *dir, char ***twice, size_t *nt, char ***lang,
+                      size_t *nl)
+{
+    char path[600];
+    snprintf(path, sizeof(path), "%s/lists", dir);
+    size_t len;
+    char *text = slurp(path, &len);
+    *twice = *lang = NULL;
+    *nt = *nl = 0;
+    for (char *line = text ? strtok(text, "\n") : NULL; line;
+         line = strtok(NULL, "\n")) {
+        bool dup = strncmp(line, "dup ", 4) == 0;
+        if (!dup && strncmp(line, "lang ", 5) != 0)
+            continue;
+        char ***l = dup ? twice : lang;
+        size_t *n = dup ? nt : nl;
+        *l = realloc(*l, (*n + 1) * sizeof(**l));
+        (*l)[(*n)++] = strdup(line + (dup ? 4 : 5));
+    }
+    free(text);
+}
+
+/* D159 in the document: each name of the language of stdlib/ told only
+   qualified under its heading */
+static int library_doc_qualified(const char *doc, const char *text)
+{
+    int failures = 0;
+    for (size_t l = 0; library_language[l]; l++) {
+        char want[256];
+        snprintf(want, sizeof(want), "`%s`", library_language[l]);
+        const char *h = text;
+        bool told = false;
+        while ((h = strstr(h, "\n### "))) {
+            h += 5;
+            const char *eol = strchr(h, '\n');
+            const char *next = strstr(h, "\n#");
+            if (!eol)
+                break;
+            const char *w = strstr(h, want);
+            if (!w || w > eol)
+                continue;
+            size_t n = next ? (size_t)(next - eol) : strlen(eol);
+            char *body = strndup(eol, n);
+            for (char *p = body; *p; p++) /* lines joined, any case */
+                *p = (char)(*p >= 'A' && *p <= 'Z' ? *p + 32
+                            : *p == '\n'          ? ' '
+                                                   : *p);
+            told = strstr(body, "solo qualificato") ||
+                   strstr(body, "only qualified");
+            free(body);
+            break;
+        }
+        if (!told) {
+            fprintf(stderr,
+                    "test_luxia: library: D159: %s is not told only qualified "
+                    "in %s\n",
+                    library_language[l], doc);
+            failures++;
+        }
+    }
+    return failures;
+}
+
+/* the rules of the library (the proposal, § 5): stdlib/ follows them;
+   each defective library of tests/units/stdbad breaks one, with the
+   messages of its file expected */
+static int test_library_rules(unsigned *count)
+{
+    size_t nt = 0, nl = 0;
+    while (library_twice[nt])
+        nt++;
+    while (library_language[nl])
+        nl++;
+    char *got = NULL;
+    size_t len;
+    FILE *out = open_memstream(&got, &len);
+    int failures = library_rules("stdlib", library_twice, nt,
+                                 library_language, nl, out) != 0;
+    fclose(out);
+    if (failures)
+        fprintf(stderr, "test_luxia: library: stdlib breaks a rule:\n%s", got);
+    free(got);
+    const char *doc = "doc/luxia-std-0.md";
+    char *text = slurp(doc, &len);
+    if (!text) {
+        doc = "job/docs/libreria_std.md";
+        text = slurp(doc, &len);
+    }
+    if (text)
+        failures += library_doc_qualified(doc, text);
+    free(text);
+    DIR *dd = opendir("tests/units/stdbad");
+    struct dirent *e;
+    while (dd && (e = readdir(dd))) {
+        if (e->d_name[0] == '.')
+            continue;
+        char dir[512], path[600];
+        snprintf(dir, sizeof(dir), "tests/units/stdbad/%s", e->d_name);
+        snprintf(path, sizeof(path), "%s/expected", dir);
+        char *want = slurp(path, &len);
+        char **twice, **lang;
+        bad_lists(dir, &twice, &nt, &lang, &nl);
+        got = NULL;
+        out = open_memstream(&got, &len);
+        library_rules(dir, (const char *const *)twice, nt,
+                      (const char *const *)lang, nl, out);
+        fclose(out);
+        if (!want || strcmp(got, want) != 0) {
+            fprintf(stderr,
+                    "test_luxia: library: %s gives\n%s  expected\n%s", dir,
+                    got, want ? want : "(no expected)\n");
+            failures++;
+        }
+        (*count)++;
+        for (size_t i = 0; i < nt; i++)
+            free(twice[i]);
+        for (size_t i = 0; i < nl; i++)
+            free(lang[i]);
+        free(twice);
+        free(lang);
+        free(got);
+        free(want);
+    }
+    if (dd)
+        closedir(dd);
+    else
+        failures++;
+    return failures;
+}
+
 int main(void)
 {
     limba_set_program("test_luxia"); /* the prefix of the messages of Limba */
@@ -4621,16 +5097,18 @@ int main(void)
     failures += test_files();
     unsigned libnames = 0;
     failures += test_library_names(&libnames);
+    unsigned badlibs = 0;
+    failures += test_library_rules(&badlibs);
     failures += test_io();
     failures += test_random();
     printf("test_luxia: %zu lexer, %zu expression, %zu program, %zu "
            "semantic, %zu run, %zu unit, %zu file and %zu input cases, "
            "%u valid "
-           "programs, %u calling C, %u names of the library, report and "
-           "limit, %d failures\n",
+           "programs, %u calling C, %u names of the library, %u defective "
+           "libraries, report and limit, %d failures\n",
            COUNT(lex_cases), COUNT(expr_cases), COUNT(program_cases),
            COUNT(sema_cases), COUNT(run_cases), COUNT(unit_cases),
            COUNT(file_cases), COUNT(io_cases), programs, ffi, libnames,
-           failures);
+           badlibs, failures);
     return failures ? 1 : 0;
 }
