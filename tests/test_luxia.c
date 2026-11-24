@@ -4290,6 +4290,282 @@ static int test_files(void)
     return failures;
 }
 
+/* ---- the names of the standard library ---- */
+
+/* a set of names, "Unit" and "Unit.Name", as written */
+typedef struct {
+    char **v;
+    size_t n, cap;
+} name_set;
+
+static void name_set_add(name_set *s, const char *unit, const char *name,
+                         size_t len)
+{
+    char buf[512];
+    if (name)
+        snprintf(buf, sizeof(buf), "%s.%.*s", unit, (int)len, name);
+    else
+        snprintf(buf, sizeof(buf), "%s", unit);
+    for (size_t i = 0; i < s->n; i++)
+        if (strcmp(s->v[i], buf) == 0)
+            return; /* an overload, or one heading naming it twice */
+    if (s->n == s->cap) {
+        s->cap = s->cap ? 2 * s->cap : 32;
+        s->v = realloc(s->v, s->cap * sizeof(*s->v));
+    }
+    s->v[s->n++] = strdup(buf);
+}
+
+static bool name_set_has(const name_set *s, const char *x)
+{
+    for (size_t i = 0; i < s->n; i++)
+        if (strcmp(s->v[i], x) == 0)
+            return true;
+    return false;
+}
+
+static void name_set_free(name_set *s)
+{
+    for (size_t i = 0; i < s->n; i++)
+        free(s->v[i]);
+    free(s->v);
+}
+
+/* the bytes of the NAME node n as the file writes them: an identifier, or
+   an operator in its quotes */
+static const char *written_name(const limba_source *src,
+                                const limba_lx_ast *t, uint32_t n,
+                                size_t *len)
+{
+    const limba_lx_node *x = &t->node[n];
+    const limba_srcfile *f = &src->file[0];
+    const char *p = f->text + (x->loc - f->base);
+    if (x->flags & LXN_F_OPNAME) {
+        *len = x->b;
+        return p;
+    }
+    size_t k = 0;
+    while (p[k] == '_' || (p[k] >= '0' && p[k] <= '9') ||
+           ((p[k] | 32) >= 'a' && (p[k] | 32) <= 'z') ||
+           (unsigned char)p[k] >= 0x80)
+        k++;
+    *len = k;
+    return p;
+}
+
+/* the names the interface of the unit in path (its text, if not NULL)
+   declares, into s: the unit, then Unit.Name for each type, value of an
+   enumeration, constant, variable and routine; false if the file is not a
+   unit that parses */
+static bool interface_names(const char *path, const char *text, name_set *s)
+{
+    limba_source src;
+    limba_source_init(&src);
+    bool ok = false;
+    if ((text ? limba_source_add(&src, path, text, strlen(text))
+              : limba_source_load(&src, path)) == UINT32_MAX) {
+        limba_source_free(&src);
+        return false;
+    }
+    limba_report rep;
+    limba_report_init(&rep, &src, 'L', 0);
+    limba_lx lx;
+    limba_lx_init(&lx);
+    limba_lx_run(&lx, &src, 0, &rep);
+    limba_lx_ast t;
+    limba_lx_ast_init(&t);
+    limba_lx_parse(&t, &lx, &src, &rep);
+    const limba_lx_node *u = &t.node[t.root];
+    if (rep.count == 0 && t.root && u->kind == LXN_UNIT) {
+        size_t len;
+        const char *w = written_name(&src, &t, u->a, &len);
+        char unit[256];
+        snprintf(unit, sizeof(unit), "%.*s", (int)len, w);
+        name_set_add(s, unit, NULL, 0);
+        for (uint32_t i = 0; i < t.node[u->b].b; i++) {
+            const limba_lx_node *d = &t.node[limba_lx_list_at(&t, u->b, i)];
+            uint32_t names = 0;
+            switch (d->kind) {
+            case LXN_CONST:
+            case LXN_ROUTINE:
+                w = written_name(&src, &t, d->a, &len);
+                name_set_add(s, unit, w, len);
+                break;
+            case LXN_TYPEDECL:
+                w = written_name(&src, &t, d->a, &len);
+                name_set_add(s, unit, w, len);
+                if (d->b && t.node[d->b].kind == LXN_TENUM)
+                    names = t.node[d->b].a;
+                break;
+            case LXN_VAR:
+                names = d->a;
+                break;
+            default: /* uses, pragmas */
+                break;
+            }
+            for (uint32_t j = 0; names && j < t.node[names].b; j++) {
+                w = written_name(&src, &t, limba_lx_list_at(&t, names, j),
+                                 &len);
+                name_set_add(s, unit, w, len);
+            }
+        }
+        ok = true;
+    }
+    limba_lx_ast_free(&t);
+    limba_lx_free(&lx);
+    limba_report_free(&rep);
+    limba_source_free(&src);
+    return ok;
+}
+
+/* the names a document of the library describes, into s: every code span
+   of a "## " heading is a unit, every one of a "### " heading Unit.Name */
+static void document_names(const char *text, name_set *s)
+{
+    for (const char *line = text; *line;) {
+        const char *end = strchr(line, '\n');
+        if (!end)
+            end = line + strlen(line);
+        bool unit = strncmp(line, "## ", 3) == 0;
+        if (unit || strncmp(line, "### ", 4) == 0) {
+            for (const char *p = line; p < end;) {
+                const char *a = memchr(p, '`', end - p);
+                const char *b = a ? memchr(a + 1, '`', end - a - 1) : NULL;
+                if (!b)
+                    break;
+                char span[512];
+                snprintf(span, sizeof(span), "%.*s", (int)(b - a - 1), a + 1);
+                name_set_add(s, span, NULL, 0);
+                p = b + 1;
+            }
+        }
+        line = *end ? end + 1 : end;
+    }
+}
+
+/* the names declared and not described, and described and not declared,
+   each told on out if not NULL: how many */
+static int names_compare(const name_set *have, const name_set *told,
+                         const char *doc, FILE *out)
+{
+    int failures = 0;
+    for (size_t i = 0; i < have->n; i++)
+        if (!name_set_has(told, have->v[i])) {
+            if (out)
+                fprintf(out,
+                        "test_luxia: library: %s is declared, not "
+                        "described in %s\n",
+                        have->v[i], doc);
+            failures++;
+        }
+    for (size_t i = 0; i < told->n; i++)
+        if (!name_set_has(have, told->v[i])) {
+            if (out)
+                fprintf(out,
+                        "test_luxia: library: %s is described in %s, not "
+                        "declared in stdlib\n",
+                        told->v[i], doc);
+            failures++;
+        }
+    return failures;
+}
+
+/* the check itself, on a unit and a document of its own: one name
+   missing each way, a value of an enumeration, a routine written twice
+   (overload) and a name differing only in case */
+static int library_names_probe(void)
+{
+    static const char unit[] =
+        "unit Probe;\n"
+        "interface\n"
+        "type Shade = (Dark, Light);\n"
+        "const Top: Int64 = 3;\n"
+        "procedure Show(x: Int64); overload;\n"
+        "procedure Show(x: Boolean); overload;\n"
+        "var Count: Int64;\n"
+        "implementation\n"
+        "procedure Show(x: Int64); begin end Show;\n"
+        "procedure Show(x: Boolean); begin end Show;\n"
+        "end Probe.\n";
+    static const char doc[] = "## Unit `Probe`\n"
+                              "### `Probe.Shade`, `Probe.Dark`\n"
+                              "### `Probe.Top`, `Probe.Show`\n"
+                              "### `Probe.count`\n"
+                              "### `Probe.Hidden`\n";
+    name_set have = {0}, told = {0};
+    int failures = 0;
+    if (!interface_names("probe.luxia", unit, &have) || have.n != 7) {
+        fprintf(stderr, "test_luxia: library: the probe unit gives %zu "
+                        "names, not 7\n",
+                have.n);
+        failures++;
+    }
+    document_names(doc, &told);
+    /* Light and Count not described, count and Hidden not declared */
+    int n = names_compare(&have, &told, "the probe", NULL);
+    if (n != 4) {
+        fprintf(stderr, "test_luxia: library: the probe gives %d "
+                        "differences, not 4\n",
+                n);
+        failures++;
+    }
+    name_set_free(&have);
+    name_set_free(&told);
+    return failures;
+}
+
+/* every name the interfaces of stdlib/ declare is described in the
+   document of the library, and every name it describes is declared */
+static int test_library_names(unsigned *count)
+{
+    int probe = library_names_probe();
+    const char *doc = "doc/luxia-std-0.md";
+    size_t len;
+    char *text = slurp(doc, &len);
+    if (!text) {
+        doc = "job/docs/libreria_std.md"; /* the draft, until published */
+        text = slurp(doc, &len);
+    }
+    struct stat st;
+    if (!text) {
+        if (stat("job", &st) == 0) {
+            fprintf(stderr, "test_luxia: no document of the library\n");
+            return probe + 1;
+        }
+        printf("test_luxia: no document of the library: names not "
+               "checked\n");
+        return probe;
+    }
+    name_set have = {0}, told = {0};
+    int failures = probe;
+    DIR *dir = opendir("stdlib");
+    struct dirent *e;
+    while (dir && (e = readdir(dir))) {
+        size_t n = strlen(e->d_name);
+        if (n < 7 || strcmp(e->d_name + n - 6, ".luxia") != 0)
+            continue;
+        char path[512];
+        snprintf(path, sizeof(path), "stdlib/%s", e->d_name);
+        if (!interface_names(path, NULL, &have)) {
+            fprintf(stderr, "test_luxia: %s is not a unit that parses\n",
+                    path);
+            failures++;
+        }
+    }
+    if (!dir) {
+        fprintf(stderr, "test_luxia: no stdlib\n");
+        failures++;
+    } else
+        closedir(dir);
+    document_names(text, &told);
+    failures += names_compare(&have, &told, doc, stderr);
+    *count = have.n;
+    name_set_free(&have);
+    name_set_free(&told);
+    free(text);
+    return failures;
+}
+
 int main(void)
 {
     limba_set_program("test_luxia"); /* the prefix of the messages of Limba */
@@ -4305,14 +4581,18 @@ int main(void)
     failures += test_run();
     failures += test_units();
     failures += test_files();
+    unsigned libnames = 0;
+    failures += test_library_names(&libnames);
     failures += test_io();
     failures += test_random();
     printf("test_luxia: %zu lexer, %zu expression, %zu program, %zu "
            "semantic, %zu run, %zu unit, %zu file and %zu input cases, "
            "%u valid "
-           "programs, %u calling C, report and limit, %d failures\n",
+           "programs, %u calling C, %u names of the library, report and "
+           "limit, %d failures\n",
            COUNT(lex_cases), COUNT(expr_cases), COUNT(program_cases),
            COUNT(sema_cases), COUNT(run_cases), COUNT(unit_cases),
-           COUNT(file_cases), COUNT(io_cases), programs, ffi, failures);
+           COUNT(file_cases), COUNT(io_cases), programs, ffi, libnames,
+           failures);
     return failures ? 1 : 0;
 }

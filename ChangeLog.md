@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `test_luxia` checks the names of the standard library against its
+  document: every name an interface of `stdlib/` declares is described
+  there, and every name described is declared (the document is a draft
+  for now; it is published when approved).
 - `luxia` finds the standard library by itself: without `--stdlib`, the
   directory `../../stdlib` from its own executable (through
   `/proc/self/exe`), if there; `--stdlib=` with nothing takes the library
