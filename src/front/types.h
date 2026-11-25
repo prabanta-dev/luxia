@@ -123,8 +123,12 @@ limba_ltype limba_types_range(limba_types *ts, limba_ltype base, __int128 lo,
                               __int128 hi);
 /* a copy of base with a root of its own */
 limba_ltype limba_types_distinct(limba_types *ts, limba_ltype base);
-/* static bounds from the index type, or DYNAMIC; false if the size
-   overflows (the type is made anyway, with size 0) */
+/* the largest size of a type, in bytes (IR § 2.2): 2^32 - 1; the blocks
+   of new and of computed bounds are not limited by it */
+#define LIMBA_TYPE_MAX_SIZE UINT64_C(0xFFFFFFFF)
+
+/* static bounds from the index type, or DYNAMIC; false if the size passes
+   LIMBA_TYPE_MAX_SIZE (the type is made anyway, with size 0) */
 limba_ltype limba_types_array(limba_types *ts, limba_ltype index,
                               limba_ltype elem, bool dynamic, bool *ok);
 /* array[index range <>] of elem: the bounds come with the argument */
@@ -142,7 +146,7 @@ limba_ltype limba_types_proc(limba_types *ts, const limba_param *params,
 limba_ltype limba_types_record_begin(limba_types *ts);
 void limba_types_record_field(limba_types *ts, limba_ltype r, uint32_t name,
                               limba_ltype type);
-/* false if the size overflows */
+/* false if the size passes LIMBA_TYPE_MAX_SIZE (then 0) */
 bool limba_types_record_end(limba_types *ts, limba_ltype r);
 
 /* an exception of identity id, child of parent (0: none) */

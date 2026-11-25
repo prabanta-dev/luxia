@@ -280,6 +280,11 @@ array[Colour] of T
   `array[Int64] of T`) is a compile-time error: no such array fits in
   memory; with computed bounds, such a length is "out of memory"
   (§ 10.1).
+- **A type takes less than 4 GiB**: an array type whose bounds are
+  known at compile time, a record (§ 3.9), and so an array of arrays or
+  of more indices, takes at most 2^32 − 1 bytes; a larger one is a
+  compile-time error. Arrays with computed bounds and those of `new`
+  (§ 9.7) have no such limit: they are bound only by memory (§ 10.1).
 - A whole array value is written with an **aggregate** (§ 6.8):
   `{1, 2, 3}`, `{Red: 1, Green: 2, Blue: 3}`, `{1: 10, else 0}`.
 
@@ -397,9 +402,9 @@ record x, y, z: Float64; end
 
 The layout of a record (the order and the place of its fields) belongs
 to the implementation; with `pragma convention(c, R)` it is that of C
-(§ 3.13). A whole record value is written with an aggregate that names
-every field, in the order of the declaration: `{x: 1.0; y: 2.0; z:
-0.0}` (§ 6.8).
+(§ 3.13). A record takes at most 2^32 − 1 bytes (§ 3.7). A whole
+record value is written with an aggregate that names every field, in
+the order of the declaration: `{x: 1.0; y: 2.0; z: 0.0}` (§ 6.8).
 
 ### 3.10 Pointers
 

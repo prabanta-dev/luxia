@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- A type takes at most 2^32 − 1 bytes (§ 3.7, § 3.9), as the IR now
+  requires: an array with bounds known at compile time, a record, an
+  array of arrays or of more indices, and an aggregate given to an open
+  array, of 4 GiB or more, is L0029, computed on the bytes with every
+  overflow checked. Arrays with computed bounds and those of `new` keep
+  no such limit. Built with Limba `f55c380`.
 - `test_luxia` checks the rules of the standard library on `stdlib/`:
   exported names in PascalCase, a name in two units only from a list and
   with `overload` in all, a name of the language only from a second list

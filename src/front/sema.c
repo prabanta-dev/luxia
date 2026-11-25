@@ -1220,7 +1220,9 @@ static limba_ltype type_node(limba_lxs *S, uint32_t node, uint32_t scope,
         limba_ltype a = limba_types_array(&S->ts, index, elem, dyn, &ok);
         if (!ok)
             lxs_error(S, LXE_CONST_RANGE, node,
-                      "the array is larger than the memory can address");
+                      "the array takes 4 GiB or more: a type takes at most "
+                      "2^32 - 1 bytes (computed bounds and new have no such "
+                      "limit)");
         if (multi)
             S->ts.t[a].flags |= LIMBA_TF_MULTI;
         if (own)
@@ -1312,7 +1314,8 @@ static limba_ltype type_node(limba_lxs *S, uint32_t node, uint32_t scope,
         }
         if (!limba_types_record_end(&S->ts, r))
             lxs_error(S, LXE_CONST_RANGE, node,
-                      "the record is larger than the memory can address");
+                      "the record takes 4 GiB or more: a type takes at "
+                      "most 2^32 - 1 bytes");
         return r;
     }
     case LXN_TPROC: {

@@ -524,6 +524,41 @@ static const sema_case sema_cases[] =
          "L0028@1:45"},
         {"program p; var f: Float32 := 16777217; begin end.", "L0029@1:30"},
         {"program p; const Z: Float32 = 1e39; begin end.", "L0029@1:31"},
+        {"program p; type B = array[Int64 range 1..4294967296] of Byte; "
+         "begin end.",
+         "L0029@1:21"},
+        {"program p; type B = array[Int64 range 1..4294967295] of Byte; "
+         "begin end.",
+         ""},
+        {"program p; type W = array[Int64 range 1..1073741824] of Int32; "
+         "begin end.",
+         "L0029@1:21"},
+        {"program p; type H = array[Int64 range 1..2147483648] of Byte; "
+         "type R = record a, b: H; end; begin end.",
+         "L0029@1:72"},
+        {"program p; type R = record a: array[Int64 range 1..4294967288] "
+         "of Byte; b: Int32; end; begin end.",
+         ""},
+        {"program p; type R = record a: array[Int64 range 1..4294967289] "
+         "of Byte; b: Int32; end; begin end.",
+         "L0029@1:21"},
+        {"program p; type R = record b: Int32; a: array[Int64 range "
+         "1..4294967291] of Byte; end; begin end.",
+         "L0029@1:21"},
+        {"program p; type Row = array[Int64 range 1..65536] of Byte; "
+         "type M = array[Int64 range 1..65536] of Row; begin end.",
+         "L0029@1:69"},
+        {"program p; type M = array[Int64 range 1..65536, Int64 range "
+         "1..65536] of Byte; begin end.",
+         "L0029@1:21"},
+        {"program p; type B = array[Int64] of Byte; begin end.",
+         "L0029@1:21"},
+        {"program p; procedure f(a: array[Int64 range <>] of Byte); "
+         "begin end; begin f({1..5000000000: 0}); end.",
+         "L0029@1:78"},
+        {"program p; var n: Int64 := 5000000000; begin var a: "
+         "array[Int64 range 1..n] of Byte; end.",
+         ""},
         {"program p; const D = 1 div 0; begin end.", "L0032@1:24"},
         {"program p; begin if 1 then end; end.", "L0027@1:21"},
         {"program p; var s: String := String(1); begin end.", "L0039@1:29"},

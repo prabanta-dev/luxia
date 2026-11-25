@@ -732,8 +732,9 @@ exponent that is no constant ("this power of constants is nan, which no
 constant is": an infinity, a NaN, −0.0, § 6.3), a shift by the width of
 the value or more, a width or number of decimals out of its limits in `write`, a
 constant argument of `arg` below 1, the bounds of an array argument
-outside the index of an open-array parameter, an array or record larger
-than the memory can address.
+outside the index of an open-array parameter, an array, record or
+aggregate of 4 GiB or more ("the array takes 4 GiB or more: a type takes
+at most 2^32 - 1 bytes", § 3.7).
 
 ```pascal
 program p;

@@ -138,7 +138,8 @@ limba_ltype limba_types_array(limba_types *ts, limba_ltype index,
             n = 0;
         /* a length past an Int64 is no array (§ 3.7) */
         if (n > (__int128)INT64_MAX ||
-            __builtin_mul_overflow((uint64_t)n, ts->t[elem].size, &size)) {
+            __builtin_mul_overflow((uint64_t)n, ts->t[elem].size, &size) ||
+            size > LIMBA_TYPE_MAX_SIZE) {
             *ok = false;
             size = 0;
         }
@@ -229,12 +230,17 @@ bool limba_types_record_end(limba_types *ts, limba_ltype r)
         uint32_t a = ft->align ? ft->align : 1;
         off = (off + a - 1) / a * a;
         f->offset = off;
-        if (__builtin_add_overflow(off, ft->size, &off))
+        if (__builtin_add_overflow(off, ft->size, &off) ||
+            off > LIMBA_TYPE_MAX_SIZE)
             ok = false;
         if (a > align)
             align = a;
     }
-    t->size = ok ? (off + align - 1) / align * align : 0;
+    if (ok)
+        off = (off + align - 1) / align * align; /* off < 2^32: no wrap */
+    if (off > LIMBA_TYPE_MAX_SIZE)
+        ok = false;
+    t->size = ok ? off : 0;
     t->align = align;
     t->flags &= (uint8_t)~LIMBA_TF_INCOMPLETE;
     return ok;

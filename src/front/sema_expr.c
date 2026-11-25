@@ -2350,6 +2350,10 @@ static limba_ltype agg_array(limba_lxs *S, uint32_t node, uint32_t scope,
             bool fits;
             limba_ltype idx = limba_types_range(&S->ts, base, lo, hi);
             result = limba_types_array(&S->ts, idx, row, false, &fits);
+            if (!fits)
+                lxs_error(S, LXE_CONST_RANGE, node,
+                          "the aggregate takes 4 GiB or more: a type takes "
+                          "at most 2^32 - 1 bytes");
             if (multi)
                 S->ts.t[result].flags |= LIMBA_TF_MULTI;
         }

@@ -120,6 +120,9 @@ limba_id lxl_type(lxl *L, limba_ltype t)
         uint64_t n = (x->flags & LIMBA_TF_DYNAMIC) || ix->hi < ix->lo
                          ? 0
                          : (uint64_t)(ix->hi - ix->lo + 1);
+        /* sema refuses a type of 2^32 bytes or more (IR § 2.2): a count
+           past UINT32_MAX is left only to elements of no bytes, whose
+           array has none either way */
         r = limba_type_array(L->m, e, n > UINT32_MAX ? 0 : (uint32_t)n);
         break;
     }
