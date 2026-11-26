@@ -2856,6 +2856,9 @@ static bool opt_func(void *ctx, limba_module *m, limba_id fid, limba_edit *e)
    may hold any byte, so its length goes to *len when len is not NULL;
    both runs read the input in (NULL: none), with the command line
    argv */
+/* the name of the source compile_run compiles, in the places it prints */
+static const char *run_name = "t.luxia";
+
 static char *compile_run(const char *src, const char *in, size_t inlen,
                          int argc, char **argv, char *end, size_t size,
                          limba_report *keep, size_t *len)
@@ -2863,7 +2866,7 @@ static char *compile_run(const char *src, const char *in, size_t inlen,
     size_t n1 = 0, n2 = 0;
     limba_source s;
     limba_source_init(&s);
-    uint32_t f = limba_source_add(&s, "t.luxia", src, strlen(src));
+    uint32_t f = limba_source_add(&s, run_name, src, strlen(src));
     limba_report rep;
     limba_report_init(&rep, &s, 'L', 0);
     limba_lx lx;
@@ -2944,6 +2947,115 @@ static char *compile_run(const char *src, const char *in, size_t inlen,
     if (len)
         *len = n1;
     return out;
+}
+
+/* the globals a program marks const (IR § 3.4, D153): only typed
+   constants whose whole value is data, none the C may write, none main
+   fills (a BigInt other than 0, a component not constant: D121); the
+   names, in the order of the module */
+static const struct {
+    const char *src, *consts;
+} const_cases[] = {
+    {"program p; type R = record a: Int32; s: String; end; "
+     "A = array[Int32 range 1..3] of R; "
+     "const T: A = {{a: 1; s: \"x\"}, else {a: 2; s: \"y\"}}; "
+     "var v: A := T; begin writeln(T[2].s, v[1].a); end.",
+     "T"},
+    /* a BigInt other than 0 is stored by main; 0 is data */
+    {"program p; type R = record k: BigInt; n: Int32; end; "
+     "const A: R = {k: 5; n: 1}; B: R = {k: 0; n: 2}; "
+     "begin writeln(A.n, B.n); end.",
+     "B"},
+    /* a run of elements with a BigInt other than 0: a loop in main */
+    {"program p; type R = record k: BigInt; n: Int32; end; "
+     "A = array[Int32 range 1..40] of R; "
+     "const C: A = {1: {k: 0; n: 1}, else {k: 7; n: 2}}; "
+     "begin writeln(C[2].k); end.",
+     ""},
+    /* a local constant of data, a routine as a value */
+    {"program p; type F = function(x: Int32): Int32; "
+     "R = record f: F; n: Int32; end; "
+     "function Twice(x: Int32): Int32; begin return 2 * x; end; "
+     "procedure q(); const C: R = {f: Twice; n: 4}; begin writeln(C.f(C.n)); "
+     "end; begin q(); end.",
+     "C"},
+    /* C takes R by address: no constant holding an R is const, the
+       others are */
+    {"program p; type R = record a, b: Int32; end; "
+     "S = record r: R; n: Int32; end; "
+     "V = array[Int32 range 1..2] of Int64; pragma convention(c, R); "
+     "procedure Put(r: R); external \"libc.so.6\"; "
+     "const A: R = {a: 1; b: 2}; B: S = {r: {a: 3; b: 4}; n: 5}; "
+     "C: V = {1, 2}; begin Put(A); writeln(B.n, C[1]); end.",
+     "C"},
+    /* an open array of C: the arrays of its elements are not const */
+    {"program p; type V = array[Int32 range 1..2] of Int32; "
+     "W = array[Int32 range 1..2] of Int64; "
+     "function Sum(a: array[Int32 range <>] of Int32): Int64; "
+     "external \"libc.so.6\"; "
+     "const A: V = {1, 2}; B: W = {3, 4}; begin writeln(Sum(A), B[1]); end.",
+     "B"},
+    /* a routine of C not reached takes nothing */
+    {"program p; type R = record a, b: Int32; end; pragma convention(c, R); "
+     "procedure Put(r: R); external \"libc.so.6\"; "
+     "const A: R = {a: 1; b: 2}; begin writeln(A.a); end.",
+     "A"},
+};
+
+static int test_consts(void)
+{
+    int failures = 0;
+    for (size_t i = 0; i < COUNT(const_cases); i++) {
+        const char *src = const_cases[i].src;
+        limba_source s;
+        limba_source_init(&s);
+        uint32_t f = limba_source_add(&s, "t.luxia", src, strlen(src));
+        limba_report rep;
+        limba_report_init(&rep, &s, 'L', 0);
+        limba_lx lx;
+        limba_lx_init(&lx);
+        limba_lx_run(&lx, &s, f, &rep);
+        limba_lx_ast t;
+        limba_lx_ast_init(&t);
+        limba_lx_parse(&t, &lx, &s, &rep);
+        limba_lxs sema;
+        limba_lxs_init(&sema, &t, &lx, &s, &rep);
+        if (rep.errors == 0)
+            limba_lxs_check(&sema);
+        limba_module *m = rep.errors ? NULL : limba_lxl_program(&sema);
+        char got[256] = "";
+        size_t n = 0;
+        if (!m)
+            snprintf(got, sizeof(got), "errors");
+        for (uint32_t g = 0; m && g < m->nglobals; g++) {
+            if (!(m->globals[g].flags & LIMBA_SYM_CONST))
+                continue;
+            size_t len;
+            const char *name = limba_str(m, m->globals[g].name, &len);
+            n += (size_t)snprintf(got + n, sizeof(got) - n, "%s%.*s",
+                                  n ? " " : "", (int)len, name);
+        }
+        limba_diag d = {{0}, 0};
+        if (m && limba_verify(m, &d) != 0)
+            snprintf(got, sizeof(got), "invalid IR: %.200s", d.msg);
+        if (strcmp(got, const_cases[i].consts)) {
+            fprintf(stderr,
+                    "test_luxia: const case %zu\n  const    %s\n  expected "
+                    "%s\n",
+                    i, got, const_cases[i].consts);
+            if (getenv("LIMBA_TEST_VERBOSE"))
+                limba_report_print(&rep, stderr);
+            failures++;
+        }
+        if (m)
+            limba_module_free(m);
+        limba_lxs_free(&sema);
+        limba_lx_ast_free(&t);
+        limba_lx_free(&lx);
+        limba_report_free(&rep);
+        limba_source_free(&s);
+    }
+    return failures;
 }
 
 static int test_run(void)
@@ -3053,10 +3165,21 @@ static char *slurp(const char *path, size_t *len)
 
 /* every program of tests/benchmarks is valid Luxia 0 and prints
    the .out of the same name in expected/, reading the .in there as its
-   input, if any */
-static int test_programs(unsigned *count)
+   input, if any; so does every program of tests/run that ends well and
+   needs no option, no argument and no unit, its input the .in beside
+   it: there they run with Meri, here with lir_run, which also sees a
+   write into a const global (IR § 3.4, D153) */
+static bool exists(const char *path)
 {
-    static const char dir[] = "tests/benchmarks";
+    FILE *f = fopen(path, "rb");
+    if (f)
+        fclose(f);
+    return f != NULL;
+}
+
+static int test_programs(const char *dir, unsigned *count)
+{
+    bool run = !strcmp(dir, "tests/run");
     int failures = 0;
     DIR *d = opendir(dir);
     if (!d) {
@@ -3070,11 +3193,28 @@ static int test_programs(unsigned *count)
         if (n < 7 || strcmp(e->d_name + n - 6, ".luxia"))
             continue;
         char path[512];
+        if (run) {
+            bool skip = false;
+            static const char *const other[] = {
+                "%s/%.*s.opts", "%s/%.*s.args", "%s/expected/%.*s.err",
+                "%s/expected/%.*s.status"};
+            for (size_t k = 0; k < COUNT(other) && !skip; k++) {
+                snprintf(path, sizeof(path), other[k], dir, (int)(n - 6),
+                         e->d_name);
+                skip = exists(path);
+            }
+            if (skip)
+                continue;
+        }
         snprintf(path, sizeof(path), "%s/%s", dir, e->d_name);
         size_t len;
         char *text = slurp(path, &len);
         if (!text) {
             failures++;
+            continue;
+        }
+        if (run && strstr(text, "uses ")) {
+            free(text);
             continue;
         }
         char *errors;
@@ -3088,6 +3228,9 @@ static int test_programs(unsigned *count)
                  e->d_name);
         char *exp = slurp(path, &elen);
         snprintf(path + strlen(path) - 4, 5, ".in");
+        if (run)
+            snprintf(path, sizeof(path), "%s/%.*s.in", dir, (int)(n - 6),
+                     e->d_name);
         char *in = slurp(path, &inlen);
         if (!exp) {
             fprintf(stderr, "test_luxia: %s: no expected output\n", e->d_name);
@@ -3096,8 +3239,10 @@ static int test_programs(unsigned *count)
         if (exp && !errors[0]) {
             char end[256];
             size_t olen;
+            run_name = e->d_name;
             char *out = compile_run(text, in, inlen, 0, NULL, end, sizeof(end),
                                     NULL, &olen);
+            run_name = "t.luxia";
             if (strcmp(end, "ok") || olen != elen ||
                 (olen && memcmp(out, exp, olen))) {
                 fprintf(stderr,
@@ -5123,11 +5268,13 @@ int main(void)
     failures +=
         test_parser(program_cases, COUNT(program_cases), true, "program");
     failures += test_sema();
-    unsigned programs = 0;
-    failures += test_programs(&programs);
+    unsigned programs = 0, runs = 0;
+    failures += test_programs("tests/benchmarks", &programs);
+    failures += test_programs("tests/run", &runs);
     unsigned ffi = 0;
     failures += test_ffi(&ffi);
     failures += test_run();
+    failures += test_consts();
     failures += test_units();
     failures += test_files();
     unsigned libnames = 0;
@@ -5137,13 +5284,15 @@ int main(void)
     failures += test_io();
     failures += test_random();
     printf("test_luxia: %zu lexer, %zu expression, %zu program, %zu "
-           "semantic, %zu run, %zu unit, %zu file and %zu input cases, "
+           "semantic, %zu run, %zu const, %zu unit, %zu file and %zu input cases, "
            "%u valid "
-           "programs, %u calling C, %u names of the library, %u defective "
+           "programs, %u of tests/run, %u calling C, %u names of the "
+           "library, %u defective "
            "libraries, report and limit, %d failures\n",
            COUNT(lex_cases), COUNT(expr_cases), COUNT(program_cases),
-           COUNT(sema_cases), COUNT(run_cases), COUNT(unit_cases),
-           COUNT(file_cases), COUNT(io_cases), programs, ffi, libnames,
+           COUNT(sema_cases), COUNT(run_cases), COUNT(const_cases),
+           COUNT(unit_cases),
+           COUNT(file_cases), COUNT(io_cases), programs, runs, ffi, libnames,
            badlibs, failures);
     return failures ? 1 : 0;
 }

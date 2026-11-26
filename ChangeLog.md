@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- A typed constant whose whole value is its initial data is a `const`
+  global of the IR (D153): the optimiser folds its reads at known
+  places, an engine may keep it in read-only memory. One that the
+  program fills at its start (a `BigInt` other than 0) is not, nor one
+  holding a record or array a C routine the program calls takes by
+  address. `test_luxia` runs the programs of `tests/run` that need no
+  option, argument or unit with `lir_run` too, which stops on a write
+  into a `const` global, and checks which globals are marked;
+  `tests/run/const_tables` reads, passes, copies and compares such
+  tables.
 - A type takes at most 2^32 − 1 bytes (§ 3.7, § 3.9), as the IR now
   requires: an array with bounds known at compile time, a record, an
   array of arrays or of more indices, and an aggregate given to an open

@@ -387,8 +387,8 @@ static int by_str(const void *a, const void *b)
     return x[0] < y[0] ? -1 : x[0] > y[0];
 }
 
-bool lxl_data(lxl *L, const limba_id *globals, uint32_t n, uint32_t init,
-              limba_ltype t)
+static bool data_of(lxl *L, const limba_id *globals, uint32_t n, uint32_t init,
+                    limba_ltype t, bool only)
 {
     const limba_typeinfo *x = ti(L, t);
     if (!n || (x->flags & LIMBA_TF_DYNAMIC) || x->kind == LIMBA_LTK_OPEN)
@@ -460,6 +460,22 @@ bool lxl_data(lxl *L, const limba_id *globals, uint32_t n, uint32_t init,
     }
     if (np)
         qsort(ps, np, sizeof(*ps), by_piece);
+    /* only data: nothing for main to store or fill */
+    bool stored = false;
+    for (uint32_t i = 0; only && i < D.nputs; i++)
+        stored = stored || D.puts[i].store;
+    for (uint32_t i = 0; only && i < np; i++)
+        stored = stored || ps[i].loop;
+    if (stored) {
+        for (uint32_t i = 0; i < np; i++)
+            free(ps[i].bytes);
+        free(ps);
+        free(z.off);
+        free(z.str);
+        free(D.puts);
+        free(D.runs);
+        return false;
+    }
     /* the strings in increasing offsets, as pairs */
     uint64_t *sp = limba_xcalloc(z.n ? 2 * z.n : 1, sizeof(*sp));
     for (uint32_t i = 0; i < z.n; i++) {
@@ -550,4 +566,16 @@ bool lxl_data(lxl *L, const limba_id *globals, uint32_t n, uint32_t init,
     free(D.puts);
     free(D.runs);
     return true;
+}
+
+bool lxl_data(lxl *L, const limba_id *globals, uint32_t n, uint32_t init,
+              limba_ltype t)
+{
+    return data_of(L, globals, n, init, t, false);
+}
+
+bool lxl_data_only(lxl *L, const limba_id *globals, uint32_t n, uint32_t init,
+                   limba_ltype t)
+{
+    return data_of(L, globals, n, init, t, true);
 }

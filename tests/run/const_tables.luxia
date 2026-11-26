@@ -1,0 +1,100 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Maurizio Cammalleri
+//
+// Typed constants whose whole value is data are const globals (IR § 3.4):
+// read at known places (folded with -O1) and at computed ones, passed to
+// routines, copied out and the twin changed, compared, holding Strings and
+// routines. A BigInt other than 0 is stored by main: not const, same values.
+// Run by luxia (Meri) and by test_luxia (lir_run, which stops on a write
+// into a const global).
+program ConstTables;
+
+type
+  Class = (Other, Digit, Letter, Space);
+  Classes = array[Int32 range 0..127] of Class;
+  Op = function(x: Int64): Int64;
+  Entry = record
+    name: String;
+    f: Op;
+    w: Int16;
+  end;
+  Entries = array[Int32 range 1..3] of Entry;
+  Pair = record a, b: Int64; end;
+  Pairs = array[Int32 range 1..300] of Pair;
+  Counted = record k: BigInt; n: Int32; end;
+
+function Double(x: Int64): Int64;
+begin
+  return 2 * x;
+end Double;
+
+function Square(x: Int64): Int64;
+begin
+  return x * x;
+end Square;
+
+const
+  Table: Classes = {48..57: Digit, 65..90: Letter, 97..122: Letter,
+                    32: Space, 9..13: Space, else Other};
+  Ops: Entries = {{name: "double"; f: Double; w: 1},
+                  {name: "square"; f: Square; w: 2},
+                  {name: ""; f: Double; w: -3}};
+  Many: Pairs = {1: {a: 1; b: -1}, 300: {a: 300; b: -300},
+                 else {a: 7; b: 8}};
+  Kept: Counted = {k: 0; n: 1};
+  Stored: Counted = {k: 98765432109876543210; n: 2};
+
+function Count(t: Classes; c: Class): Int32;
+var
+  n: Int32 := 0;
+begin
+  for var i: Int32 := 0 to 127 do
+    if t[i] = c then
+      n := n + 1;
+    end;
+  end;
+  return n;
+end Count;
+
+function Sum(p: Pairs): Int64;
+var
+  s: Int64 := 0;
+begin
+  for var i: Int32 := 1 to 300 do
+    s := s + p[i].a + p[i].b;
+  end;
+  return s;
+end Sum;
+
+procedure Local();
+const
+  Inner: Pair = {a: 40; b: 2};
+begin
+  writeln(Inner.a + Inner.b);
+end Local;
+
+var
+  twin: Pairs := Many;
+  line: String := "Az 9?";
+
+begin
+  writeln(ord(Table[48]), " ", ord(Table[65]), " ", ord(Table[32]), " ",
+          ord(Table[127]));
+  for var i: Int64 := 1 to length(line) do
+    write(ord(Table[Int32(line[i])]));
+  end;
+  writeln();
+  writeln(Count(Table, Digit), " ", Count(Table, Letter), " ",
+          Count(Table, Space), " ", Count(Table, Other));
+  for var i: Int32 := 1 to 3 do
+    writeln("[", Ops[i].name, "] ", Ops[i].f(5), " ", Ops[i].w);
+  end;
+  writeln(Many[1].a, " ", Many[2].b, " ", Many[300].b, " ", Sum(Many));
+  twin[2].a := 1000;
+  writeln(twin[2].a, " ", Many[2].a, " ", twin = Many, " ",
+          Sum(twin) - Sum(Many));
+  twin[2].a := 7;
+  writeln(twin = Many);
+  writeln(Kept.k, " ", Kept.n, " ", Stored.k, " ", Stored.n);
+  Local();
+end.

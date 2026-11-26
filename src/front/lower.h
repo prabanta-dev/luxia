@@ -380,6 +380,11 @@ void lxl_put_run(lxl *L, limba_id p, uint64_t off, uint64_t count, uint32_t vn,
    component not constant) */
 bool lxl_data(lxl *L, const limba_id *globals, uint32_t n, uint32_t init,
               limba_ltype t);
+/* the same when all of it is data, nothing stored by main: true and the
+   data given, or false and nothing done; a global of such a value may be
+   const (IR § 3.4, D153) */
+bool lxl_data_only(lxl *L, const limba_id *globals, uint32_t n, uint32_t init,
+                   limba_ltype t);
 void lxl_branch(lxl *L, uint32_t node, limba_id t, limba_id f);
 /* v, of type from, as a value of type to: range checks and widths */
 limba_id lxl_coerce(lxl *L, limba_id v, limba_ltype from, limba_ltype to);
