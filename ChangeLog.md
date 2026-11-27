@@ -5,9 +5,10 @@
 - A typed constant whose whole value is its initial data is a `const`
   global of the IR (D153): the optimiser folds its reads at known
   places, an engine may keep it in read-only memory. One that the
-  program fills at its start (a `BigInt` other than 0) is not, nor one
-  holding a record or array a C routine the program calls takes by
-  address. `test_luxia` runs the programs of `tests/run` that need no
+  program fills at its start (a `BigInt` other than 0) is not. A C
+  function never writes through a parameter of mode `in` (§ 10.4): one
+  that does makes the program erroneous, so a constant given to C stays
+  `const`. `test_luxia` runs the programs of `tests/run` that need no
   option, argument or unit with `lir_run` too, which stops on a write
   into a `const` global, and checks which globals are marked;
   `tests/run/const_tables` reads, passes, copies and compares such

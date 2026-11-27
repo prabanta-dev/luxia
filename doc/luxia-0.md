@@ -2171,6 +2171,12 @@ A call of an external routine (§ 8.5) leaves the language:
 - an address given to C (a `var` or `out` parameter, an array, a record
   by address) is valid **only during the call**: a C function that keeps
   it, or frees memory of Luxia, makes the program erroneous, as in Ada;
+- a C function **never writes through a parameter of mode `in`**: an
+  array in mode `in` is a `const T *` for C (§ 8.5), and a record in
+  mode `in` reaches C as a copy. A C function that writes there makes
+  the program erroneous, as one that keeps the address: nothing detects
+  it, the object may be a typed constant in read-only memory (§ 4.3),
+  and the object is taken as unchanged by the call;
 - the declaration is **not compared** with the library: a wrong
   signature gives wrong data or a crash, as in Ada;
 - on either side of the call the rules of Luxia hold as everywhere.

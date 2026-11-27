@@ -1665,63 +1665,10 @@ static void declare_nested(lxl *L, const limba_lx_node *x, bool unreached)
     }
 }
 
-/* does type t hold, itself or at any depth, a value of type u, or with
-   open, an array whose innermost elements are of type u */
-static bool holds(const lxl *L, limba_ltype t, limba_ltype u, bool open)
-{
-    const limba_types *ts = &L->S->ts;
-    const limba_typeinfo *x = ti(L, t);
-    if (!open && limba_types_same(ts, t, u))
-        return true;
-    if (x->kind == LIMBA_LTK_ARRAY) {
-        limba_ltype e = x->elem;
-        while (ti(L, e)->kind == LIMBA_LTK_ARRAY)
-            e = ti(L, e)->elem;
-        if (open && limba_types_same(ts, e, u))
-            return true;
-        return holds(L, x->elem, u, open);
-    }
-    if (x->kind == LIMBA_LTK_RECORD)
-        for (uint32_t i = 0; i < x->count; i++)
-            if (holds(L, ts->field[x->first + i].type, u, open))
-                return true;
-    return false;
-}
-
-/* may the C write a value of type t: a routine of C the program reaches
-   takes by address a record or an array that t holds (§ 10.4); the
-   runtime is no such boundary, lir_run sees what it writes */
-static bool c_may_write(const lxl *L, limba_ltype t)
-{
-    const limba_lxs *S = L->S;
-    for (limba_sym s = 1; s < S->st.nsym; s++) {
-        if (!lxl_external(L, s) || !reached(L, s) ||
-            lxs_rt_of(S, nd(L, S->st.sym[s].node)->d) >= 0)
-            continue;
-        const limba_typeinfo *r = ti(L, S->st.sym[s].type);
-        if (r->kind != LIMBA_LTK_ROUTINE)
-            continue;
-        for (uint32_t i = 0; i < r->count; i++) {
-            limba_ltype p = S->ts.param[r->first + i].type;
-            unsigned k = ti(L, p)->kind;
-            if ((k == LIMBA_LTK_RECORD || k == LIMBA_LTK_ARRAY) &&
-                holds(L, t, p, false))
-                return true;
-            if (k == LIMBA_LTK_OPEN) {
-                while (ti(L, p)->kind == LIMBA_LTK_OPEN)
-                    p = ti(L, p)->elem;
-                if (holds(L, t, p, true))
-                    return true;
-            }
-        }
-    }
-    return false;
-}
-
 /* the typed constants whose whole value is data, nothing stored by main
    (D121): const globals (IR § 3.4, D153), given their data before any
-   routine is made, so that each sees them const; not one the C may
-   write */
+   routine is made, so that each sees them const. C never writes through
+   a parameter in mode in (§ 10.4), and a constant goes to no other */
 static void const_data(lxl *L)
 {
     limba_lxs *S = L->S;
@@ -1729,7 +1676,7 @@ static void const_data(lxl *L)
         const limba_lx_node *x = nd(L, S->tconsts[i]);
         limba_sym s = S->sym[x->a];
         limba_ltype t = s ? S->st.sym[s].type : 0;
-        if (!t || L->store[s].kind != LXL_GLOBAL || c_may_write(L, t))
+        if (!t || L->store[s].kind != LXL_GLOBAL)
             continue;
         limba_id g = L->store[s].global;
         if (lxl_data_only(L, &g, 1, x->c, t))

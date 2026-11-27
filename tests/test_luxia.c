@@ -559,6 +559,62 @@ static const sema_case sema_cases[] =
         {"program p; var n: Int64 := 5000000000; begin var a: "
          "array[Int64 range 1..n] of Byte; end.",
          ""},
+        /* a typed constant, or a component of one, is never a var or out
+           argument, of C too: C only reads what it is given (§ 10.4) */
+        {"program p; type R = record a, b: Int32; end; V = array[Int32 "
+         "range 1..2] of Int32; pragma convention(c, R); procedure "
+         "SetA(var x: Int32); external \"libc.so.6\"; procedure GetA(out "
+         "x: Int32); external \"libc.so.6\"; procedure SetR(var r: R); "
+         "external \"libc.so.6\"; procedure SetV(var v: array[Int32 "
+         "range <>] of Int32); external \"libc.so.6\"; const C: R = {a: "
+         "1; b: 2}; D: V = {3, 4}; W: array[Int32 range 1..1] of R = "
+         "{{a: 5; b: 6}}; begin SetA(C.a); end.",
+         "L0034@1:441"},
+        {"program p; type R = record a, b: Int32; end; V = array[Int32 "
+         "range 1..2] of Int32; pragma convention(c, R); procedure "
+         "SetA(var x: Int32); external \"libc.so.6\"; procedure GetA(out "
+         "x: Int32); external \"libc.so.6\"; procedure SetR(var r: R); "
+         "external \"libc.so.6\"; procedure SetV(var v: array[Int32 "
+         "range <>] of Int32); external \"libc.so.6\"; const C: R = {a: "
+         "1; b: 2}; D: V = {3, 4}; W: array[Int32 range 1..1] of R = "
+         "{{a: 5; b: 6}}; begin GetA(D[1]); end.",
+         "L0034@1:441"},
+        {"program p; type R = record a, b: Int32; end; V = array[Int32 "
+         "range 1..2] of Int32; pragma convention(c, R); procedure "
+         "SetA(var x: Int32); external \"libc.so.6\"; procedure GetA(out "
+         "x: Int32); external \"libc.so.6\"; procedure SetR(var r: R); "
+         "external \"libc.so.6\"; procedure SetV(var v: array[Int32 "
+         "range <>] of Int32); external \"libc.so.6\"; const C: R = {a: "
+         "1; b: 2}; D: V = {3, 4}; W: array[Int32 range 1..1] of R = "
+         "{{a: 5; b: 6}}; begin SetR(C); end.",
+         "L0034@1:441"},
+        {"program p; type R = record a, b: Int32; end; V = array[Int32 "
+         "range 1..2] of Int32; pragma convention(c, R); procedure "
+         "SetA(var x: Int32); external \"libc.so.6\"; procedure GetA(out "
+         "x: Int32); external \"libc.so.6\"; procedure SetR(var r: R); "
+         "external \"libc.so.6\"; procedure SetV(var v: array[Int32 "
+         "range <>] of Int32); external \"libc.so.6\"; const C: R = {a: "
+         "1; b: 2}; D: V = {3, 4}; W: array[Int32 range 1..1] of R = "
+         "{{a: 5; b: 6}}; begin SetV(D); end.",
+         "L0034@1:441"},
+        {"program p; type R = record a, b: Int32; end; V = array[Int32 "
+         "range 1..2] of Int32; pragma convention(c, R); procedure "
+         "SetA(var x: Int32); external \"libc.so.6\"; procedure GetA(out "
+         "x: Int32); external \"libc.so.6\"; procedure SetR(var r: R); "
+         "external \"libc.so.6\"; procedure SetV(var v: array[Int32 "
+         "range <>] of Int32); external \"libc.so.6\"; const C: R = {a: "
+         "1; b: 2}; D: V = {3, 4}; W: array[Int32 range 1..1] of R = "
+         "{{a: 5; b: 6}}; begin SetA(W[1].b); end.",
+         "L0034@1:441"},
+        {"program p; type R = record a, b: Int32; end; V = array[Int32 "
+         "range 1..2] of Int32; pragma convention(c, R); procedure "
+         "SetA(var x: Int32); external \"libc.so.6\"; procedure GetA(out "
+         "x: Int32); external \"libc.so.6\"; procedure SetR(var r: R); "
+         "external \"libc.so.6\"; procedure SetV(var v: array[Int32 "
+         "range <>] of Int32); external \"libc.so.6\"; const C: R = {a: "
+         "1; b: 2}; D: V = {3, 4}; W: array[Int32 range 1..1] of R = "
+         "{{a: 5; b: 6}}; begin SetR(W[1]); end.",
+         "L0034@1:441"},
         {"program p; const D = 1 div 0; begin end.", "L0032@1:24"},
         {"program p; begin if 1 then end; end.", "L0027@1:21"},
         {"program p; var s: String := String(1); begin end.", "L0039@1:29"},
@@ -2979,23 +3035,23 @@ static const struct {
      "procedure q(); const C: R = {f: Twice; n: 4}; begin writeln(C.f(C.n)); "
      "end; begin q(); end.",
      "C"},
-    /* C takes R by address: no constant holding an R is const, the
-       others are */
+    /* C never writes through a parameter in mode in (§ 10.4): a
+       constant C reads stays const */
     {"program p; type R = record a, b: Int32; end; "
      "S = record r: R; n: Int32; end; "
      "V = array[Int32 range 1..2] of Int64; pragma convention(c, R); "
      "procedure Put(r: R); external \"libc.so.6\"; "
      "const A: R = {a: 1; b: 2}; B: S = {r: {a: 3; b: 4}; n: 5}; "
      "C: V = {1, 2}; begin Put(A); writeln(B.n, C[1]); end.",
-     "C"},
-    /* an open array of C: the arrays of its elements are not const */
+     "A B C"},
+    /* an open array of C, in mode in: const too */
     {"program p; type V = array[Int32 range 1..2] of Int32; "
      "W = array[Int32 range 1..2] of Int64; "
      "function Sum(a: array[Int32 range <>] of Int32): Int64; "
      "external \"libc.so.6\"; "
      "const A: V = {1, 2}; B: W = {3, 4}; begin writeln(Sum(A), B[1]); end.",
-     "B"},
-    /* a routine of C not reached takes nothing */
+     "A B"},
+    /* a routine of C not reached */
     {"program p; type R = record a, b: Int32; end; pragma convention(c, R); "
      "procedure Put(r: R); external \"libc.so.6\"; "
      "const A: R = {a: 1; b: 2}; begin writeln(A.a); end.",
